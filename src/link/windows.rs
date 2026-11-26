@@ -214,9 +214,10 @@ use windows::core::PCWSTR;
 use super::usb::{PRODUCT, Pipe, REPORT_LEN, VENDOR};
 
 /// The device path of the headphones' vendor HID interface (interface 0), when they
-/// are plugged in over USB.
+/// are plugged in over USB. Switched off but plugged in, the headphones are that one
+/// interface and nothing else, and its path then has no interface number in it.
 fn usb_headphones() -> Option<String> {
-    let wanted = format!("vid_{VENDOR}&pid_{PRODUCT}&mi_00");
+    let (on, off) = (format!("vid_{VENDOR}&pid_{PRODUCT}&mi_00"), format!("vid_{VENDOR}&pid_{PRODUCT}#"));
     unsafe {
         let class = HidD_GetHidGuid();
         let mut len = 0u32;
@@ -228,7 +229,10 @@ fn usb_headphones() -> Option<String> {
         if CM_Get_Device_Interface_ListW(&class, PCWSTR::null(), &mut list, CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS {
             return None;
         }
-        list.split(|c| *c == 0).map(String::from_utf16_lossy).find(|path| path.to_ascii_lowercase().contains(&wanted))
+        list.split(|c| *c == 0).map(String::from_utf16_lossy).find(|path| {
+            let path = path.to_ascii_lowercase();
+            path.contains(&on) || path.contains(&off)
+        })
     }
 }
 

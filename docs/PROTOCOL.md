@@ -60,12 +60,13 @@ pipe: usage page 1, usage 0, report id `0x10`, 32 bytes each way, no feature rep
 The MOMENTUM 5 (`3542:1004`) is reported to have an interface of the same shape.
 **No project documents what it speaks**, and none controls the headphones over the
 cable. `mo4 usb-probe` exists to find out, on Linux and on Windows. MO4 still cannot
-control anything this way: the outside of a frame is worked out, and no command the
-headphones accept has been found.
+control anything this way. The shape of a frame is worked out and a few frames are
+accepted: one reads a Bluetooth address, one turns the headphones off, and four do
+something that has not been identified. No setting has been read or changed.
 
 Everything below was seen on one unit (an M4AEBT SE on firmware 3.38.3, USB device
 version 29.11, 2026-11-26), first from Linux and then from Windows 11 with the same
-answers. About fifty frames were sent in all.
+answers. About 330 frames were sent in all.
 
 #### Where the format comes from
 
@@ -76,79 +77,106 @@ others ([phatnguyen-v1/btd700-tray](https://github.com/phatnguyen-v1/btd700-tray
 [steph4n-gh/signal-deck](https://github.com/steph4n-gh/signal-deck)). The dongle takes
 `34 FE <command> <length> <arguments>` in a 64-byte report and answers `34 FF <command>
 <length> <data>`. It sends `FC` on its own when something changes, and the computer
-acknowledges that with `FD`. The headphones use the same four first bytes, with one
-byte more behind them, and their command numbers are not the dongle's.
+acknowledges that with `FD`. The headphones take the same `FE`. They answer with `FD`
+where the dongle answers `FF`, put a route in front of the command, split the command
+in two, and put a status in every answer. Their command numbers are not the dongle's.
 
 #### What a frame looks like
 
 ```
-sent      FE | route | b2 | b3 | the rest (zeros in everything tried so far)
-answered  FD | route, turned around | b2 | b3 | code | zeros
+sent      FE | route | group | number | length | arguments
+answered  FD | route, turned around | group | number | status | length | data
 ```
 
-Every frame got exactly one answer, within about 20 ms, and every answer so far is
-this refusal. Nothing arrives unasked: the pipe stays silent while the ear cup is
+The length and arguments on the sending side are a reading and have not been tried:
+every frame sent so far had zeros there. The reading rests on one answer (status
+`07`, below).
+
+Every frame got exactly one answer, within about 20 ms, except the one that turned the
+headphones off. Nothing arrives unasked: the pipe stays silent while the ear cup is
 tapped and swiped and the headphones are taken off and put on, and so does the
 media-key interface. Over the cable, gestures never reach the computer.
 
 - **First byte.** Only `FE` is taken as a command. `FC`, `FD` and `FF` were each
-  refused with code `06`, whatever followed. That is why a Bluetooth frame placed in a
-  report as is (`FF 03 ...`) gets `FD 03 00 00 06` back for any command in it.
+  refused with status `06`, whatever followed. That is why a Bluetooth frame placed in
+  a report as is (`FF 03 ...`) gets `FD 03 00 00 06` back for any command in it.
 - **Route.** The second byte is two halves, to and from. The headphones answer as 1
   and as 5: `10` comes back as `01`, `12` as `21`, `1F` as `F1`, `50` as `05`, `51` as
-  `15`. Every other first half (0, 2 to 4, 6 to F, all tried) comes back unchanged.
-  What 1 and 5 are is not known, and neither is whether the second half matters: with
-  1 in the first half, 0, 1, 2, 5, 6, 7, 8 and F in the second were all refused alike.
-- **b2 and b3** come back as sent. Whether they are one 16-bit command, or a command
-  and a length as on the dongle, is not known.
-- **Code.** With route `10` the code follows b2 and ignores b3: `04` and `06` in b2
-  gave code `04`, `00` and `12` gave code `05`. Which of the two means "no such
-  command" and which "wrong arguments" is not known. A route nobody answers gave code
-  `05` in every frame tried (all with b2 `00`).
+  `15`. Every other first half (0, 2 to 4, 6 to F, all tried) comes back unchanged
+  and is refused with status `05`. What 1 and 5 are is not known. The same frames got
+  the same status on routes `10`, `50`, `11`, `15` and `51`, and with 1 in the first
+  half the second half made no difference (0, 1, 2, 5, 6, 7, 8 and F tried).
+- **Group and number** come back as sent. The groups the headphones know are `01` to
+  `0E` and `18`. That is every value of the byte tried with number `00` on route `10`,
+  except `13` and `14`, which were left out because they are the dongle's factory reset
+  and disconnect. No group has a number `00`.
+- **Status.**
+
+  | Status | Seen when |
+  |---|---|
+  | `00` | the frame was accepted. A length and that many bytes follow when there is something to return |
+  | `03` | some numbers in a known group (`01`/`01`, `03`/`04`, `05`/`01`). Read as: the number is there and something else is wrong |
+  | `04` | number `00` in every known group, and `06`/`03`, `04`/`04`, `04`/`95`. Read as: the group has no such number |
+  | `05` | a group the headphones do not know, or a route nobody answers |
+  | `06` | the first byte was not `FE` |
+  | `07` | once, followed by `06`: read as "wrong length, six bytes wanted" |
 
 #### What was sent
 
-| Sent | Answer | Why it was tried |
+| Sent | Answer | What it is |
 |---|---|---|
 | `FF 03 00 00 04 95 12 06` | `FD 03 00 00 06` | the Bluetooth model read as is (battery and the Qualcomm version read got the same) |
 | `FC 03`, `FD 03` | `FD 03 00 00 06` | the other first bytes the dongle uses |
-| `FE xx` for 30 other values of `xx` | `FD xx 00 00 05`, `xx` turned around when it starts with 1 or 5 | to find what the second byte is |
-| `FE 10 00 00` | `FD 01 00 00 05` | |
-| `FE 10 12 00` | `FD 01 12 00 05` | the dongle's firmware read, and the first half of the Bluetooth ones |
-| `FE 10 12 06` | `FD 01 12 06 05` | Bluetooth model read `1206` |
-| `FE 10 12 01` | `FD 01 12 01 05` | Bluetooth firmware read `1201` |
+| `FE xx` for 30 values of `xx` | `FD xx 00 00 05`, `xx` turned around when it starts with 1 or 5 | how the route was found |
+| `FE 10 xx 00` for every `xx` but `13` and `14` | status `04` for `01` to `0E` and `18`, `05` for the rest | the groups |
+| `FE 10 12 06`, `FE 10 12 01`, `FE 10 12 00` | status `05` | Bluetooth model and firmware reads, and the dongle's firmware read: there is no group `12` |
 | `FE 10 06 03` | `FD 01 06 03 04` | Bluetooth battery read `0603` |
-| `FE 10 06 00` | `FD 01 06 00 04` | the dongle's state read |
-| `FE 10 04 95 12 06` | `FD 01 04 95 04` | vendor `0495`, then the model read |
-| `FE 10 04 04 95 12 06` | `FD 01 04 04 04` | a length, then vendor and model read |
+| `FE 10 04 95 12 06`, `FE 10 04 04 95 12 06` | status `04` | vendor `0495` and the model read, with and without a length in front |
+| `FE 10 01 01` | status `03` | |
+| `FE 10 01 02`, `FE 10 01 03`, `FE 10 01 04` | status `00`, nothing returned | **accepted. What they did is not known** |
+| `FE 10 03 01` | `FD 01 03 01 00 06` and six bytes | **reads a Bluetooth address.** It starts with Sennheiser's `80:C3:BA`, so presumably the headphones' own |
+| `FE 10 03 02` | `FD 01 03 02 07 06` | refused. If the `06` is the length it wants, this writes that address. Do not send it with six bytes |
+| `FE 10 03 03` | status `00`, nothing returned | **accepted. What it did is not known** |
+| `FE 10 03 04` | status `03` | |
+| `FE 10 05 01` | status `03` | |
+| `FE 10 05 02` | no answer | **turns the headphones off** |
 
-So neither the Bluetooth command words nor the dongle's command numbers work behind a
-route the headphones answer on, in any arrangement tried.
+The Bluetooth command words do not work here in any arrangement tried, and the
+dongle's numbers do not line up either: its reads at `01`, `03` and `05` with nothing
+after them are refused, and its firmware read at `12` is not a group at all.
+
+#### Switched off and plugged in
+
+After `FE 10 05 02` the headphones left the bus and came back within seconds as
+a different device: the same ids, a different serial string, and the control pipe as
+the only interface, with no audio and no media keys. They stayed that way across a
+replug. Switching them on with the button brought the full device back, with its old
+serial string. So this is what the headphones look like when they are off and
+charging, and the pipe is still there. Nothing has been sent to it in that state.
+
+This may also be what happened in the first session on Linux, where between two
+writes the USB function dropped and came back twice within three seconds, once
+briefly with a different serial string. What caused that is still not known.
 
 #### Before sending anything else
 
-- No frame sent so far did anything that could be seen from the computer: the USB
-  device was still there after each batch. The settings were not read back over
-  Bluetooth afterwards, so that is all that can be said.
-- During the first session on Linux, between two writes (about 100 seconds after one
-  and 30 seconds before the next), the headphones' USB function dropped and came back
-  twice within three seconds, once briefly with a different serial string (the
-  headphones' string table also holds `ABCDEF0123456789`, at index 3, which may be
-  what showed). The hub inside them stayed up, so it was not the cable. What caused it
-  is not known, and it was not seen again.
-- Do not walk through the values of b2 or b3 to see which ones the headphones react
-  to. The dongle has a factory reset at `13` and a disconnect at `14`. In the
-  Bluetooth protocol the `06xx` commands include a power-off (`0605`) and a reboot
-  (`060F`) according to
-  [Asfax03L/momentum-5-control](https://github.com/Asfax03L/momentum-5-control), and
-  `06` is one of the two values of b2 the pipe treats differently. Whether either
-  numbering carries over is exactly what is not known.
-- `mo4 usb-probe` listens and sends nothing. `mo4 usb-probe --send "FE 10 06 03"`
-  sends that frame, zero-padded to 32 bytes, and prints the answer; it sends whatever
-  it is given.
+- **The headphones act on what they accept.** One frame turned them off. Four more
+  were accepted with zeros for arguments and returned nothing, and the settings were
+  not read back over Bluetooth afterwards, so what those four did is open. A status
+  `00` with nothing after it is not a harmless answer.
+- **Do not walk through the numbers of a group.** That is how the power-off was
+  found, ten frames into a walk through four numbers of three groups. A walk through
+  the groups with number `00` was harmless only because no group has a number `00`.
+- Group `03` holds the Bluetooth address, and number `02` looks like its write.
+- The dongle has a factory reset at `13` and a disconnect at `14`. Those two groups
+  are the only ones not tried, and whether the headphones know them is not known.
+- `mo4 usb-probe` listens and sends nothing. `mo4 usb-probe --send "FE 10 03 01"`
+  sends that frame, zero-padded to 32 bytes, and prints the answer, marking an
+  accepted frame as such. It sends whatever it is given, one frame after another, and
+  does not stop when one is accepted.
 
-More guessing is unlikely to settle it. Something that already speaks to the pipe
-would (a service tool, or the headphones' own firmware).
+More guessing is a poor way forward from here. Something that already speaks to the
+pipe would settle it (a service tool, or the headphones' own firmware).
 
 ## Frames
 
@@ -286,6 +314,6 @@ and leaves those command words alone on such firmware.
   headset only.
 - The Windows program builds and passes its tests on GitHub, and its transport has
   **not** been run against headphones.
-- **The USB pipe answers, and no command it accepts is known** (see USB under
-  Transport). `mo4 usb-probe` has been run against headphones on Linux and on
+- **The USB pipe answers and accepts a few frames, none of them a setting** (see USB
+  under Transport). `mo4 usb-probe` has been run against headphones on Linux and on
   Windows 11; on Windows that is the only part of MO4 that has.

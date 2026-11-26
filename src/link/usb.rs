@@ -1,7 +1,8 @@
 //! The headphones' USB control pipe: a vendor HID interface with a protocol of its own
-//! (see "USB" in docs/PROTOCOL.md). MO4 does not control the headphones through it,
-//! because no command it accepts is known yet. `mo4 usb-probe` is the tool for finding
-//! out: it listens, or sends raw frames and prints what comes back.
+//! (see "USB" in docs/PROTOCOL.md). MO4 does not control the headphones through it:
+//! only a few of its commands are known, and one of those turns the headphones off.
+//! `mo4 usb-probe` is the tool for finding out more: it listens, or sends raw frames and
+//! prints what comes back.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -14,8 +15,10 @@ pub const PRODUCT: &str = "1000";
 pub const REPORT_ID: u8 = 0x10;
 pub const REPORT_LEN: usize = 32;
 
-/// The first byte of every reply seen so far: a refusal, with a code in the fifth byte.
-const REFUSAL: u8 = 0xFD;
+/// The first byte of every reply seen so far. The fifth byte is then a status.
+const REPLY: u8 = 0xFD;
+/// The status of a frame the headphones accepted.
+const ACCEPTED: u8 = 0x00;
 /// How long to wait for the headphones to answer a frame. They answer within 20 ms.
 const REPLY_WAIT: Duration = Duration::from_secs(2);
 /// How long to keep listening after an answer, in case a second report follows.
@@ -57,8 +60,15 @@ pub fn parse_frame(text: &str) -> Result<Vec<u8>, String> {
 /// What a report (without its report id) says, as far as anyone knows.
 fn note(report: &[u8]) -> String {
     match report {
-        [REFUSAL, _, _, _, code, ..] => format!("refused, code {code:02X}"),
-        [marker, ..] => format!("not a refusal (it starts with {marker:02X}): nothing like this has been seen before"),
+        [REPLY, _, _, _, ACCEPTED, rest @ ..] => match rest {
+            // What follows an accepted frame is a length and that many bytes.
+            [len, data @ ..] if *len > 0 && usize::from(*len) <= data.len() => {
+                format!("ACCEPTED, with {len} byte(s): {}", hex(&data[..usize::from(*len)]))
+            }
+            _ => "ACCEPTED, with nothing returned".into(),
+        },
+        [REPLY, _, _, _, code, ..] => format!("refused, code {code:02X}"),
+        [marker, ..] => format!("not a reply (it starts with {marker:02X}): nothing like this has been seen before"),
         [] => "an empty report".into(),
     }
 }
@@ -98,8 +108,8 @@ fn listen(pipe: &mut dyn Pipe, window: Duration, answer: bool) -> Result<usize, 
 /// Otherwise each frame is sent as one report, zero-padded, and whatever answers it is
 /// printed; `seconds` then adds a listening period at the end.
 ///
-/// The frames go out as written. What the headphones do with a frame they accept is not
-/// known, so sending is for someone who has read docs/PROTOCOL.md first.
+/// The frames go out as written, and the headphones act on the ones they accept (one
+/// known frame turns them off), so sending is for someone who has read docs/PROTOCOL.md.
 pub fn probe(seconds: Option<u64>, frames: &[Vec<u8>]) -> Result<(), String> {
     let (name, mut pipe) = open()?;
     println!("USB control pipe: {name}");
@@ -150,6 +160,19 @@ mod tests {
         assert_eq!(note(&refused), "refused, code 04");
         assert_eq!(hex(unpadded(&refused)), "FD 01 06 03 04");
 
+        // An accepted read: six bytes came back (these six are made up).
+        let mut read = [0u8; REPORT_LEN];
+        read[..12].copy_from_slice(&[0xFD, 0x01, 0x03, 0x01, 0x00, 0x06, 0xAA, 0xBB, 0xCC, 0x01, 0x02, 0x03]);
+        assert_eq!(note(&read), "ACCEPTED, with 6 byte(s): AA BB CC 01 02 03");
+
+        // An accepted frame that returned nothing, and a refusal that names a length.
+        let mut done = [0u8; REPORT_LEN];
+        done[..5].copy_from_slice(&[0xFD, 0x01, 0x01, 0x02, 0x00]);
+        assert_eq!(note(&done), "ACCEPTED, with nothing returned");
+        let mut short = [0u8; REPORT_LEN];
+        short[..6].copy_from_slice(&[0xFD, 0x01, 0x03, 0x02, 0x07, 0x06]);
+        assert_eq!(note(&short), "refused, code 07");
+
         // A refusal whose echoed bytes and padding are all zero keeps its code.
         let mut bare = [0u8; REPORT_LEN];
         bare[..5].copy_from_slice(&[0xFD, 0x01, 0x00, 0x00, 0x05]);
@@ -159,6 +182,6 @@ mod tests {
 
     #[test]
     fn says_when_a_reply_is_new() {
-        assert!(note(&[0xFF, 0x01, 0x06, 0x03, 0x01, 0x50]).starts_with("not a refusal (it starts with FF)"));
+        assert!(note(&[0xFF, 0x01, 0x06, 0x03, 0x01, 0x50]).starts_with("not a reply (it starts with FF)"));
     }
 }
