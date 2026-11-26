@@ -1,56 +1,127 @@
 # MO4
 
-A small desktop app for Windows 11 and Linux that controls a pair of **Sennheiser
-MOMENTUM 4** headphones: noise control, the equalizer and the settings that otherwise
-only the phone app can reach. Written in Rust, one self-contained program, no driver
-and no account. Everything it changes is stored on the headphones, so it keeps working
-after you close the app.
+A small desktop app for Linux and Windows 11 that controls **Sennheiser MOMENTUM 4**
+headphones: noise control, the equalizer and the settings that otherwise only the phone
+app can reach. It is one self-contained program written in Rust, with no driver and no
+account. Everything it changes is stored on the headphones, so it keeps working after
+you close the app.
 
-![The window, connected to the built-in simulator](docs/screenshot.png)
+![The MO4 window, connected to the built-in simulator](docs/screenshot.png)
 
-> **Status: works on real headphones on Linux for everything tried so far.**
-> Over an Intel AX200, MO4 connected to an M4AEBT SE on firmware 3.38.3 at the first
-> attempt, read every setting, and changed one (anti-wind) with the headphones
-> confirming it; what it saw matches [docs/PROTOCOL.md](docs/PROTOCOL.md). The other
-> settings have only been changed on the built-in simulator. The Windows program
-> builds and passes its tests on GitHub but has never been run against headphones. The
-> screenshot above shows the simulator, which the window labels as such.
+MO4 is unofficial. It is not affiliated with Sennheiser or Sonova, and it talks to the
+headphones with a protocol nobody published (see [how it was worked out](docs/PROTOCOL.md)).
+Use it at your own risk.
+
+## Status
+
+| | |
+|---|---|
+| **Linux** | Works on real headphones: an M4AEBT SE on firmware 3.38.3, over an Intel AX200. Every setting reads correctly, and the changes tried so far were confirmed by the headphones. |
+| **Windows 11** | Builds and passes its tests on GitHub. It has not been run against headphones yet, so treat it as untested. |
+| **Other models** | Untested. Other recent Sennheiser headphones offer the same control service, so MO4 may connect to them, but nothing is known to work. |
+| **Firmware** | The equalizer needs firmware 3.18 or newer. |
+
+The screenshots on this page show the built-in simulator, a made-up headset used for
+testing, which the titlebar labels as such.
 
 ## What it does
 
-- **Noise control:** Adaptive, Custom or Off. In Custom, one dial runs from full noise
-  cancelling through neutral to full transparency: drag it, scroll, or use the arrow
-  keys. Anti-wind (off, auto, max), transparent hearing, and pausing while transparent.
-- **Equalizer:** the headphones' own five-band EQ, edited on a graph. Drag a node,
-  scroll over a band or use the arrow keys (half-dB steps, a tenth with Shift);
-  double-click a node to zero it. A lamp says whether the curve is on the headphones,
-  and what the headphones hold is drawn dashed behind your edit until the two agree.
-  Presets (eight built in, plus your own with SAVE AS), bass boost, and the sound mode
-  (off, equalizer, podcast).
-- **Settings:** on-head detection, smart pause, auto answer, comfort call, touch lock,
-  auto power-off, voice prompts and sidetone.
-- **Read-only:** battery and charging, model, firmware, serial, the codec in use,
-  whether they are being worn, and the paired devices.
+### Noise control
+
+<img src="docs/detail-noise-dial.png" alt="The noise dial at 60% noise canceling" width="304" align="right">
+
+- **Adaptive, Custom or Off.** In Adaptive the headphones set the level themselves.
+- **One dial in Custom**, from full noise canceling through neutral to full
+  transparency. Drag it, scroll, or use the arrow keys; double-click for neutral.
+- **Anti-wind:** off, auto or max.
+- **Transparent hearing**, and pausing playback while it is on.
+- **Paired devices** and how many may be connected at once (read-only).
+
+<br clear="right">
+
+### Equalizer
+
+The headphones' own five-band equalizer, edited on a graph.
+
+- Drag a node, scroll over a band, or use the arrow keys. Steps are half a dB, a tenth
+  with Shift held. Double-click a node to zero it.
+- A lamp says whether the curve is on the headphones, and what the headphones hold is
+  drawn dashed behind your edit until the two agree.
+- **Presets** in three groups, plus your own with SAVE AS.
+- **Bass boost**, and the **sound mode**: off, equalizer or podcast. The curve is only
+  heard in equalizer mode, so editing it switches the mode on.
+
+![Adaptive noise control with the Classical preset](docs/screenshot-adaptive.png)
+
+### Settings and readings
+
+- On-head detection, smart pause, auto answer, comfort call, touch lock, auto
+  power-off, voice prompts and sidetone.
+- Battery and charging, model, firmware, serial number, the codec in use and whether
+  the headphones are being worn.
+
+### Nothing is guessed
 
 Every value on screen is one the headphones reported. A setting they did not report
-shows as N/A or "not reported" rather than a guess, and after each change the app reads
-the value back and says whether the headphones confirmed it. The line at the bottom
-shows what happened last (click it for the history), or how to work the control under
-the pointer. Every control can be reached with Tab and worked from the keyboard.
+shows as N/A or "not reported". After each change the app reads the value back and says
+whether the headphones confirmed it. The line at the bottom shows what happened last;
+click it for the history.
+
+![The history of confirmed changes](docs/detail-history.png)
+
+Without headphones the window says why, and draws no readings at all:
+
+![The window with no headphones connected](docs/screenshot-not-connected.png)
+
+Every control can be reached with Tab and worked from the keyboard, and the app follows
+the reduced-motion setting of KDE and of Windows.
+
+## Presets
+
+Gains are in dB for the five bands, lowest first. The headphones report those bands at
+90 Hz, 325 Hz, 1.5 kHz, 6.5 kHz and 6.5 kHz.
+
+| Group | Preset | Curve | For |
+|---|---|---|---|
+| Tone | Flat | 0 0 0 0 0 | no change |
+| Tone | Warm | +3.0 +1.5 0 -1.0 -2.0 | fuller lows, a softer top |
+| Tone | Bass | +5.0 +2.5 0 0 0 | low-end weight |
+| Tone | Vocal | -2.0 0 +3.0 +2.0 0 | voices forward |
+| Tone | Bright | 0 0 0 +2.5 +4.0 | air and detail |
+| Tone | Loudness | +4.0 +1.0 -1.0 +1.5 +3.5 | a gentle V for low volume |
+| Tone | Night | -3.0 0 +1.5 +2.0 -1.0 | easy on the ears |
+| Music | Post-rock | +1.5 -1.5 0 +1.0 +2.5 | post-rock, dream pop, ambient electronica: depth for pads, a clear wash, air on top |
+| Music | Rap | +3.5 -1.0 +0.5 +1.5 +1.0 | sub-bass weight with the voice kept in front |
+| Music | Classic rock | +2.0 +1.0 +1.0 +2.0 -0.5 | body and warmth, guitars forward, an easier top |
+| Music | Alt rock | +2.5 -1.5 +0.5 +2.5 +1.0 | tight punch, less mud, guitar bite |
+| Music | Classical | -2.0 -1.0 0 +1.5 +2.5 | less of the stock bass lift, strings and hall air |
+| Games | Footsteps | -4.0 -1.5 +2.0 +5.0 +3.0 | thin lows, lifted presence |
+
+The music presets are starting points by ear, not measurements. They assume the
+bass-forward tuning reviewers agree these headphones have, so they add less bass than a
+curve for a neutral headphone would. Change them to taste and keep your own.
+
+## Install
+
+Packages are on the [releases page](https://github.com/innerpulsenet/mo4/releases).
+
+- **Debian or Ubuntu:** `sudo apt install ./mo4_<version>_amd64.deb`
+- **Other Linux:** unpack `mo4-<version>-linux-x64.tar.gz` and run `linux/install.sh`,
+  which installs for your user only.
+- **Windows 11:** unzip `mo4-<version>-windows-x64.zip` and run `mo4.exe`. There is no
+  installer. Windows may warn about an unsigned program.
 
 ## Connecting
 
 Control goes over **Bluetooth**. Pair and connect the headphones in the system's
 Bluetooth settings as usual; MO4 finds them on its own and never pairs anything itself.
 
-Over a **USB cable** the headphones are a sound card, and no known project controls
-them that way. If they are plugged in on a computer without Bluetooth, MO4 says so
-instead of pretending. `mo4 usb-probe` is there to investigate the cable's control
-pipe (see below).
+Over a USB cable the headphones are only a sound card as far as MO4 is concerned: the
+cable has a control channel of its own that does not speak this protocol.
 
 The phone app uses the same channel. Close it if MO4 cannot connect.
 
-## First run
+### First run
 
 Start with something that only reads:
 
@@ -59,7 +130,8 @@ mo4 status --trace
 ```
 
 It prints each frame sent and received, then everything the headphones report. If that
-works, the window will too. If it fails, the trace is what to look at.
+works, the window will too. If it fails, the trace is what to put in a bug report (it
+includes the serial number, which you may want to remove).
 
 ## Command line
 
@@ -70,7 +142,7 @@ mo4 get <setting>           one value
 mo4 set <setting> <value>   change a setting and confirm it
 mo4 eq                      the equalizer curve
 mo4 eq 2 0 -1 1.5 3         set every band, in dB
-mo4 eq footsteps            apply a preset by name
+mo4 eq classic rock         apply a preset by name
 mo4 presets                 list presets
 mo4 watch                   print changes as the headphones report them
 mo4 help                    the settings and their values
@@ -78,19 +150,19 @@ mo4 help                    the settings and their values
 
 Options: `--addr AA:BB:CC:DD:EE:FF` to use one device instead of searching,
 `--channel N` to name the RFCOMM channel (Linux), `--trace` to print every frame, and
-`--sim` to talk to the built-in simulated headset (made-up values, clearly labeled).
+`--sim` to talk to the built-in simulated headset.
 
-## Install
+## What it will not do
 
-Each push to `main` builds packages on GitHub; they are attached to the run under
-Actions, and to a release when a version tag is pushed.
+Some commands the headphones accept are destructive, and MO4 refuses to send them from
+anywhere in the program: factory reset, firmware upgrade, forgetting or disconnecting
+paired devices (which wiped the pairing on some firmware), and remapping the touch
+surface. It also opens only the channels the headphones list for their control service;
+sending control frames to other channels has been reported to switch the headset off.
 
-- **Linux, Debian or Ubuntu:** `sudo apt install ./mo4_<version>_amd64.deb` (menu
-  entry and icons included).
-- **Linux, anything else:** unpack `mo4-<version>-linux-x64.tar.gz` and run
-  `linux/install.sh`, which installs for your user only.
-- **Windows 11:** unzip `mo4-<version>-windows-x64.zip` and run `mo4.exe`. There is no
-  installer.
+Not there yet: a tray icon, the equalizer of firmware older than 3.18, renaming the
+headphones, connecting a paired device from the app, sound personalization (left as the
+phone app set it), and screen reader support.
 
 ## Build
 
@@ -103,38 +175,11 @@ and adds a menu entry, and `linux/package-deb.sh` makes the `.deb`. On Windows, 
 on Windows: `cargo build --release` gives `target\release\mo4.exe`.
 
 `cargo test` runs the protocol, client and command line tests against the simulator
-and against frames captured from real headphones.
-
-## Files
+and against frames captured from real headphones. GitHub builds and packages both
+platforms on every push, and publishes a release when a version tag is pushed.
 
 Your presets are kept as plain text in `presets.txt`: in `~/.config/mo4/` on Linux and
 next to the exe on Windows.
-
-## What it will not do
-
-Some commands the headphones accept are destructive, and MO4 refuses to send them from
-anywhere in the program: factory reset, firmware upgrade, forgetting or disconnecting
-paired devices (which wiped the pairing on some firmware), and remapping the touch
-surface. It also opens only the channels the headphones list for their control service;
-sending control frames to other channels has been reported to switch the headset off.
-
-Not there yet: a tray icon, the equalizer of firmware older than 3.18, renaming the
-headphones, connecting a paired device from the app, and sound personalization (left as
-the phone app set it).
-
-## USB probe (Linux, experimental)
-
-The cable exposes a raw HID pipe (report `0x10`, 32 bytes each way) that nobody has
-documented. To look at it:
-
-```
-linux/install.sh --udev        # lets your user open it (asks for sudo), then replug
-mo4 usb-probe                  # listen only, sends nothing
-mo4 usb-probe --query          # send one read of the model name and print any answer
-```
-
-`--query` is a guess at how frames are wrapped. It sends a single harmless read, but it
-is still an unknown interface on your headphones: your call.
 
 ## Credits
 
@@ -145,5 +190,12 @@ The protocol knowledge comes from
 [Ariazonaa/momentum-control](https://github.com/Ariazonaa/momentum-control),
 [mislavperi/momentum-control](https://github.com/mislavperi/momentum-control) and
 [f3Y0/momentum4-control](https://github.com/f3y0/momentum4-control). MO4 shares no code
-with them. It is not affiliated with Sennheiser or Sonova. Fonts: Instrument Sans,
-JetBrains Mono and Syne, under the SIL Open Font License (`assets/fonts`).
+with them.
+
+Fonts: Instrument Sans, JetBrains Mono and Syne, under the SIL Open Font License
+(`assets/fonts`). Sennheiser and MOMENTUM are trademarks of their owners, used here only
+to say what the app works with.
+
+## License
+
+No license has been chosen yet, so for now the default applies: all rights reserved.

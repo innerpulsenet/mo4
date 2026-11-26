@@ -194,7 +194,7 @@ pub struct DialEvent {
 
 /// The noise dial, the window's main instrument: a knurled cap inside a ring of 25
 /// cells with a scale around it. The top of the ring is neutral; cells light to the
-/// left for noise cancelling and to the right for transparency. `level` is 0 to 100,
+/// left for noise canceling and to the right for transparency. `level` is 0 to 100,
 /// or `None` when the headphones have not said. `intro` runs 0 to 1 as the dial comes
 /// alive after connecting: the light sweeps out from neutral to the value.
 pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_word: &str, intro: f32) -> DialEvent {

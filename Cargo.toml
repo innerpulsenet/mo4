@@ -1,8 +1,9 @@
 [package]
 name = "mo4"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2024"
 description = "Desktop control for Sennheiser MOMENTUM 4 headphones: noise control, equalizer and settings"
+repository = "https://github.com/innerpulsenet/mo4"
 publish = false
 
 [dependencies]

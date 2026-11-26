@@ -128,7 +128,7 @@ headphones then push that feature's current values at once. Features: 2 device,
 |---|---|---|---|
 | Noise control on/off | `1A04` | `1A05` | `[0/1]` |
 | Mode table | `1A00` | `1A01` | pairs `[id, value]`: 1 anti-wind (0 off, 1 max, 2 auto), 2 "comfort" (always 0 on this model), 3 adaptive (0/1). Get returns all three pairs; set takes one pair or the whole table |
-| Level | `1A02` | `1A03` | `[0..100]`: 0 full noise cancelling, 50 neutral, 100 full transparency |
+| Level | `1A02` | `1A03` | `[0..100]`: 0 full noise canceling, 50 neutral, 100 full transparency |
 | Transparent hearing | `1804` | `1805` | `[0/1]` |
 | Pause while transparent | `1800` | `1801` | `[0/1]` |
 
@@ -140,7 +140,7 @@ The phone app offers three modes on this model, built from the above:
 
 Captured side effects (3.37.3): turning noise control on set the level to 0 and
 transparent hearing off. While adaptive is on the level is ignored. One report has
-`1A05` reading 0 on a unit that was audibly cancelling noise, so the mode MO4 shows
+`1A05` reading 0 on a unit that was audibly canceling noise, so the mode MO4 shows
 is what the headphones report, not a promise about what is heard.
 
 ### Equalizer (feature 8), firmware 3.18.0 and newer

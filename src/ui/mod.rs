@@ -67,8 +67,8 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
     let viewport = egui::ViewportBuilder::default()
         .with_title("MO4")
         .with_app_id("mo4")
-        .with_inner_size([1240.0, 760.0])
-        .with_min_inner_size([1140.0, 740.0])
+        .with_inner_size([1240.0, 780.0])
+        .with_min_inner_size([1140.0, 760.0])
         .with_icon(egui::IconData { rgba: include_bytes!("../../assets/icon-256.rgba").to_vec(), width: 256, height: 256 })
         .with_decorations(false);
     let options = eframe::NativeOptions { viewport, ..Default::default() };
@@ -306,7 +306,7 @@ impl App {
         }
         // The two ends of the dial, named under them.
         let ends = widgets::painter(ui, turnable);
-        widgets::legend(&ends, pos2(inner.left() + 2.0, dial.bottom() - 7.0), Align2::LEFT_CENTER, "noise cancelling", 8.5, steel::lerp(steel::TEXT_3, TINT, 0.7));
+        widgets::legend(&ends, pos2(inner.left() + 2.0, dial.bottom() - 7.0), Align2::LEFT_CENTER, "noise canceling", 8.5, steel::lerp(steel::TEXT_3, TINT, 0.7));
         widgets::legend(&ends, pos2(inner.right() - 2.0, dial.bottom() - 7.0), Align2::RIGHT_CENTER, "transparency", 8.5, steel::lerp(steel::TEXT_3, widgets::TINT_2, 0.7));
         y += 248.0 + 10.0;
 
@@ -337,7 +337,7 @@ impl App {
 
         let row = |y: f32| Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 28.0));
         let th = held!(self, TransparentHearing).or(d.transparent_hearing);
-        if let Some(v) = widgets::switch_row(ui, row(y), "th", "Transparent hearing", "Let the outside in. Turning noise cancelling on switches this off", th, online) {
+        if let Some(v) = widgets::switch_row(ui, row(y), "th", "Transparent hearing", "Let the outside in. Turning noise canceling on switches this off", th, online) {
             self.send(Setting::TransparentHearing(v));
         }
         y += 30.0;
@@ -421,8 +421,17 @@ impl App {
         child.set_clip_rect(list.shrink(1.0));
         child.spacing_mut().item_spacing = vec2(0.0, 0.0);
         egui::ScrollArea::vertical().show(&mut child, |ui| {
+            let mut group = "";
+            let heading = |ui: &mut Ui, text: &str| {
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+                widgets::caption(ui.painter(), Rect::from_min_max(pos2(r.left() + 11.0, r.top() + 8.0), pos2(r.right() - 9.0, r.bottom())), text);
+            };
             for preset in self.presets.iter().filter(|x| x.gains.len() == bands) {
-                let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), if usable { Sense::click() } else { Sense::hover() });
+                if preset.group != group {
+                    group = preset.group;
+                    heading(ui, group);
+                }
+                let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), if usable { Sense::click() } else { Sense::hover() });
                 let active = usable && preset.gains == shown;
                 let rp = widgets::painter(ui, usable);
                 let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered() && usable);
@@ -430,12 +439,12 @@ impl App {
                     rp.rect_filled(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), steel::alpha(if active { TINT } else { steel::TEXT }, if active { 0.14 } else { 0.05 * hover }));
                 }
                 if active {
-                    rp.rect_filled(Rect::from_min_size(row.min + vec2(2.0, 7.0), vec2(2.0, row.height() - 14.0)), CornerRadius::same(1), TINT);
+                    rp.rect_filled(Rect::from_min_size(row.min + vec2(2.0, 5.0), vec2(2.0, row.height() - 10.0)), CornerRadius::same(1), TINT);
                 }
                 let text_clip = rp.with_clip_rect(Rect::from_min_max(row.min, pos2(row.right() - 46.0, row.bottom())).intersect(rp.clip_rect()));
-                text_clip.text(row.min + vec2(11.0, 6.0), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
-                text_clip.text(row.min + vec2(11.0, 21.0), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
-                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 10.0), pos2(row.right() - 9.0, row.bottom() - 10.0)), &preset.gains, if active { TINT } else { steel::TEXT_3 });
+                text_clip.text(row.min + vec2(11.0, 2.0), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
+                text_clip.text(row.min + vec2(11.0, 16.5), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
+                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 8.0), pos2(row.right() - 9.0, row.bottom() - 8.0)), &preset.gains, if active { TINT } else { steel::TEXT_3 });
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, usable, active, format!("Preset {}", preset.name)));
                 if resp.has_focus() {
                     rp.rect_stroke(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), Stroke::new(1.0, steel::EMBER), StrokeKind::Inside);
@@ -446,10 +455,10 @@ impl App {
             }
             if !self.presets.iter().any(|x| !x.builtin) {
                 // Nothing of the user's own yet: say how to get one here.
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
-                steel::groove_h(ui.painter(), r.left() + 11.0, r.right() - 9.0, r.top() + 8.0);
+                heading(ui, store::YOURS);
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
                 let g = ui.painter().layout("Shape a curve and press SAVE AS to keep it here.".to_owned(), sans(11.5), steel::TEXT_3, r.width() - 22.0);
-                ui.painter().galley(r.min + vec2(11.0, 20.0), g, steel::TEXT_3);
+                ui.painter().galley(r.min + vec2(11.0, 2.0), g, steel::TEXT_3);
             }
         });
         if let Some(gains) = apply {
@@ -529,7 +538,7 @@ impl App {
             return;
         }
         self.presets.retain(|x| !x.name.eq_ignore_ascii_case(name));
-        self.presets.push(Preset { name: name.to_string(), note: "yours".into(), gains, builtin: false });
+        self.presets.push(Preset { name: name.to_string(), note: "saved by you".into(), gains, builtin: false, group: store::YOURS });
         match store::save_presets(&self.presets) {
             Ok(()) => self.note(format!("Preset \"{name}\" saved"), Tone::Good),
             Err(e) => self.note(format!("Could not save presets: {e}"), Tone::Bad),
@@ -684,7 +693,8 @@ impl App {
         let h = 34.0 + lines.len().max(1) as f32 * 19.0;
         let card = Rect::from_min_max(pos2(foot.left() + 12.0, foot.top() - h - 8.0), pos2(foot.left() + 700.0, foot.top() - 8.0));
         let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("log-card")));
-        p.rect(card, CornerRadius::same(steel::R_GLASS), steel::alpha(steel::SURFACE_1, 0.97), Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
+        // Opaque: text from the controls underneath must not show through the lines.
+        p.rect(card, CornerRadius::same(steel::R_GLASS), steel::SURFACE_1, Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
         steel::glass(&p, card);
         widgets::legend(&p, card.min + vec2(14.0, 11.0), Align2::LEFT_TOP, "history", 9.5, steel::TEXT_3);
         if lines.is_empty() {

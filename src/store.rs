@@ -11,22 +11,48 @@ pub struct Preset {
     /// Tenths of a dB per band.
     pub gains: Vec<i8>,
     pub builtin: bool,
+    /// The heading it is listed under.
+    pub group: &'static str,
 }
 
-/// Curves for the five-band equalizer, written for this app.
-const BUILTIN: [(&str, &str, [i8; 5]); 8] = [
-    ("Flat", "no change", [0, 0, 0, 0, 0]),
-    ("Warm", "fuller lows, soft top", [30, 15, 0, -10, -20]),
-    ("Bass", "low-end weight", [50, 25, 0, 0, 0]),
-    ("Vocal", "voices forward", [-20, 0, 30, 20, 0]),
-    ("Bright", "air and detail", [0, 0, 0, 25, 40]),
-    ("Loudness", "gentle V shape", [40, 10, -10, 15, 35]),
-    ("Footsteps", "thin lows, presence", [-40, -15, 20, 50, 30]),
-    ("Night", "easy on the ears", [-30, 0, 15, 20, -10]),
+/// The heading for presets the user saved.
+pub const YOURS: &str = "yours";
+
+/// Curves for the five-band equalizer, written for this app: group, name, note, and
+/// the gain of each band in tenths of a dB, lowest band first.
+///
+/// The music curves are starting points by ear, not measurements. They assume what
+/// reviews agree on about these headphones, a bass-forward stock tuning, so they add
+/// less bass than a curve for a neutral headphone would, and they stay inside the
+/// headphones' range of 6 dB either way.
+const BUILTIN: [(&str, &str, &str, [i8; 5]); 13] = [
+    ("tone", "Flat", "no change", [0, 0, 0, 0, 0]),
+    ("tone", "Warm", "fuller lows, soft top", [30, 15, 0, -10, -20]),
+    ("tone", "Bass", "low-end weight", [50, 25, 0, 0, 0]),
+    ("tone", "Vocal", "voices forward", [-20, 0, 30, 20, 0]),
+    ("tone", "Bright", "air and detail", [0, 0, 0, 25, 40]),
+    ("tone", "Loudness", "gentle V shape", [40, 10, -10, 15, 35]),
+    ("tone", "Night", "easy on the ears", [-30, 0, 15, 20, -10]),
+    // Layered, reverb-heavy and quiet-to-loud: depth for pads and sub-bass, the low
+    // mids thinned so the wash stays clear, soft vocals left alone, air on top.
+    ("music", "Post-rock", "dream pop, ambient", [15, -15, 0, 10, 25]),
+    // Sub-bass carries the track and the voice has to stay in front of it: weight at
+    // the bottom, mud out, a little presence for consonants and hi-hats.
+    ("music", "Rap", "deep sub, clear voice", [35, -10, 5, 15, 10]),
+    // Tape-era records are light below the kick and live in the mids: body and
+    // warmth added, guitars and voices forward, the top eased to keep cymbals kind.
+    ("music", "Classic rock", "warm, guitars forward", [20, 10, 10, 20, -5]),
+    // Dense, loud modern masters: punch kept tight, the crowded low mids pulled
+    // back, bite for distorted guitars without piling on the top.
+    ("music", "Alt rock", "tight lows, bite", [25, -15, 5, 25, 10]),
+    // An orchestra wants the headphone out of the way: the stock bass lift taken
+    // down, the mids untouched, strings and hall air brought up gently.
+    ("music", "Classical", "natural, hall air", [-20, -10, 0, 15, 25]),
+    ("games", "Footsteps", "thin lows, presence", [-40, -15, 20, 50, 30]),
 ];
 
 pub fn builtin_presets() -> Vec<Preset> {
-    BUILTIN.iter().map(|(name, note, gains)| Preset { name: (*name).into(), note: (*note).into(), gains: gains.to_vec(), builtin: true }).collect()
+    BUILTIN.iter().map(|(group, name, note, gains)| Preset { name: (*name).into(), note: (*note).into(), gains: gains.to_vec(), builtin: true, group }).collect()
 }
 
 /// Where this app keeps its files: `~/.config/mo4` on Linux, beside the exe on Windows.
@@ -47,7 +73,7 @@ pub fn parse_presets(text: &str) -> Vec<Preset> {
                 return None;
             }
             let gains: Option<Vec<i8>> = values.split(',').map(|v| parse_db(v.trim())).collect();
-            Some(Preset { name: name.into(), note: "yours".into(), gains: gains.filter(|g| !g.is_empty())?, builtin: false })
+            Some(Preset { name: name.into(), note: "saved by you".into(), gains: gains.filter(|g| !g.is_empty())?, builtin: false, group: YOURS })
         })
         .collect()
 }
@@ -119,7 +145,7 @@ mod tests {
     #[test]
     fn presets_round_trip() {
         let mut all = builtin_presets();
-        all.push(Preset { name: "Mine".into(), note: "yours".into(), gains: vec![15, -35, 0, 60, -60], builtin: false });
+        all.push(Preset { name: "Mine".into(), note: "saved by you".into(), gains: vec![15, -35, 0, 60, -60], builtin: false, group: YOURS });
         let text = format_presets(&all);
         assert!(!text.contains("Flat"));
         assert_eq!(parse_presets(&text), vec![all.last().unwrap().clone()]);
@@ -139,5 +165,18 @@ mod tests {
         for p in builtin_presets() {
             assert!(p.gains.iter().all(|g| (-60..=60).contains(g)), "{}", p.name);
         }
+    }
+
+    #[test]
+    fn builtin_presets_are_distinct_and_findable() {
+        let all = builtin_presets();
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a.name.to_lowercase(), b.name.to_lowercase());
+                assert_ne!(a.gains, b.gains, "{} and {} are the same curve", a.name, b.name);
+            }
+        }
+        assert_eq!(find_preset(&all, "classic rock").map(|p| p.group), Some("music"));
+        assert!(find_preset(&all, "post-rock").is_some());
     }
 }

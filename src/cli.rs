@@ -16,7 +16,7 @@ MO4: control for Sennheiser MOMENTUM 4 headphones
   mo4 set <setting> <value>   change a setting and confirm it
   mo4 eq                      the equalizer curve
   mo4 eq <dB> <dB> ...        set every band, in dB (for example: mo4 eq 2 0 -1 1.5 3)
-  mo4 eq <preset>             apply a preset by name
+  mo4 eq <preset>             apply a preset by name (for example: mo4 eq classic rock)
   mo4 presets                 list presets
   mo4 watch                   print changes as the headphones report them
   mo4 usb-probe [--query] [--seconds N]
@@ -24,7 +24,7 @@ MO4: control for Sennheiser MOMENTUM 4 headphones
 
 Settings:
   mode                  adaptive | custom | off
-  level                 0-100 (0 full noise cancelling, 50 neutral, 100 full transparency)
+  level                 0-100 (0 full noise canceling, 50 neutral, 100 full transparency)
   anti-wind             off | max | auto
   transparent-hearing   on | off
   pause-on-transparency on | off
@@ -158,7 +158,7 @@ fn eq_line(d: &Device) -> String {
                 .enumerate()
                 .map(|(i, g)| {
                     let label = d.eq_freqs.get(i).copied().flatten().map_or_else(|| format!("band {}", i + 1), hz_label);
-                    format!("{label} {:+.1}", f32::from(*g) / 10.0)
+                    format!("{label} {}", device::db_text(*g))
                 })
                 .collect();
             bands.join("   ")
@@ -205,7 +205,7 @@ pub fn run(args: &[String], target: &Target, trace: bool) -> Result<(), String> 
         Some("help") | Some("--help") | Some("-h") => print!("{HELP}"),
         Some("presets") => {
             for p in store::load_presets() {
-                println!("{:<12} {:<28} {}", p.name, device::gains_text(&p.gains), p.note);
+                println!("{:<6} {:<13} {:<28} {}", p.group, p.name, device::gains_text(&p.gains), p.note);
             }
         }
         Some("status") => {
@@ -233,8 +233,9 @@ pub fn run(args: &[String], target: &Target, trace: bool) -> Result<(), String> 
         }
         Some("eq") => {
             let mut c = connect(target, trace)?;
-            if let Some(first) = arg(1) {
-                let gains = match store::find_preset(&store::load_presets(), first) {
+            if args.len() > 1 {
+                // A preset's name may be more than one word ("classic rock").
+                let gains = match store::find_preset(&store::load_presets(), &args[1..].join(" ")) {
                     Some(p) => p.gains.clone(),
                     None => args[1..].iter().map(|s| store::parse_db(s).ok_or(format!("\"{s}\" is neither a preset nor a gain in dB"))).collect::<Result<_, _>>()?,
                 };

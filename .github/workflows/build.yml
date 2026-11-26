@@ -1,7 +1,7 @@
 name: build
 
 # Every push to main tests and packages the app for Linux (.deb and .tar.gz) and
-# Windows (.zip), kept as artifacts of the run. Pushing a tag like v0.2.0 also
+# Windows (.zip), kept as artifacts of the run. Pushing a tag like v0.5 or v0.5.1 also
 # publishes them as a GitHub release.
 on:
   push:
@@ -66,8 +66,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check the tag matches the version in Cargo.toml
         run: |
+          # A tag may leave off a zero patch number: v0.5 is version 0.5.0.
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+          if [ "v$version" != "$GITHUB_REF_NAME" ] && [ "v${version%.0}" != "$GITHUB_REF_NAME" ]; then
             echo "Tag $GITHUB_REF_NAME does not match version $version in Cargo.toml" >&2
             exit 1
           fi

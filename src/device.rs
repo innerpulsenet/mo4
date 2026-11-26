@@ -63,7 +63,7 @@ pub struct Device {
     pub adaptive: Option<bool>,
     /// Index into [`ANTI_WIND`].
     pub anti_wind: Option<u8>,
-    /// 0 is full noise cancelling, 100 full transparency.
+    /// 0 is full noise canceling, 100 full transparency.
     pub noise_level: Option<u8>,
     pub transparent_hearing: Option<bool>,
     pub pause_on_transparency: Option<bool>,
@@ -279,13 +279,13 @@ pub fn auto_off_name(seconds: u16) -> String {
     }
 }
 
-/// How the level dial reads: below the middle it is noise cancelling strength, above
+/// How the level dial reads: below the middle it is noise canceling strength, above
 /// it transparency.
 pub fn noise_level_text(level: u8) -> (String, &'static str) {
     let v = i32::from(level.min(100));
     match v {
         50 => ("0".into(), "neutral"),
-        v if v < 50 => (format!("{}", (50 - v) * 2), "noise cancelling"),
+        v if v < 50 => (format!("{}", (50 - v) * 2), "noise canceling"),
         v => (format!("{}", (v - 50) * 2), "transparency"),
     }
 }
@@ -362,8 +362,13 @@ impl Setting {
     }
 }
 
+/// A gain in tenths of a dB as text: "+2.5", "-1.0", and plain "0" for none.
+pub fn db_text(tenths: i8) -> String {
+    if tenths == 0 { "0".into() } else { format!("{:+.1}", f32::from(tenths) / 10.0) }
+}
+
 pub fn gains_text(gains: &[i8]) -> String {
-    gains.iter().map(|g| format!("{:+.1}", f32::from(*g) / 10.0)).collect::<Vec<_>>().join(" ")
+    gains.iter().map(|g| db_text(*g)).collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -466,7 +471,7 @@ mod tests {
 
     #[test]
     fn words_the_level_dial() {
-        assert_eq!(noise_level_text(0), ("100".into(), "noise cancelling"));
+        assert_eq!(noise_level_text(0), ("100".into(), "noise canceling"));
         assert_eq!(noise_level_text(50), ("0".into(), "neutral"));
         assert_eq!(noise_level_text(75), ("50".into(), "transparency"));
     }
