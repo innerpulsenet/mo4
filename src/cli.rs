@@ -19,6 +19,7 @@ MO4: control for Sennheiser MOMENTUM 4 headphones
   mo4 eq <preset>             apply a preset by name (for example: mo4 eq classic rock)
   mo4 presets                 list presets
   mo4 watch                   print changes as the headphones report them
+  mo4 usb-off                 switch the headphones off over the USB cable
   mo4 usb-probe [--seconds N]
                               listen on the USB control pipe (experimental)
   mo4 usb-probe --send \"FE 10 06 03\" [--send ...] [--seconds N]
@@ -294,6 +295,10 @@ pub fn run(args: &[String], target: &Target, trace: bool) -> Result<(), String> 
                 }
             }
             usb::probe(seconds, &frames)?;
+        }
+        Some("usb-off") => {
+            usb::power_off()?;
+            println!("Accepted. The headphones go off within a few seconds and stay on USB, charging, until they are switched on with their power button.");
         }
         Some(other) => return Err(format!("unknown command \"{other}\" (see mo4 help)")),
         None => unreachable!("the window handles no command"),

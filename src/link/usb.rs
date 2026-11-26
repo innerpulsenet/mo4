@@ -34,10 +34,73 @@ pub struct Cable {
     pub version: Option<u16>,
 }
 
+/// The frame that turns the headphones off: to address 1, group 01, number 04. They
+/// accept it, and go off a few seconds later.
+const POWER_OFF: [u8; 4] = [0xFE, 0x10, 0x01, 0x04];
+/// The USB device versions the power-off frame has been seen to work on. Nobody has
+/// published these command numbers, so headphones that report another version are not
+/// assumed to agree with them and are not sent the frame.
+const POWER_OFF_SEEN_ON: [u16; 1] = [0x2911];
+
+fn version_text(v: u16) -> String {
+    format!("{:x}.{:02x}", v >> 8, v & 0xFF)
+}
+
 impl Cable {
     pub fn version_text(&self) -> Option<String> {
-        self.version.map(|v| format!("{:x}.{:02x}", v >> 8, v & 0xFF))
+        self.version.map(version_text)
     }
+
+    /// Whether MO4 will send these headphones the power-off frame: they are switched
+    /// on, and report a USB device version the frame has been seen to work on.
+    pub fn can_power_off(&self) -> bool {
+        self.on && self.version.is_some_and(|v| POWER_OFF_SEEN_ON.contains(&v))
+    }
+}
+
+/// Where switching off over the cable is known to work, for telling the user.
+pub fn power_off_versions() -> String {
+    POWER_OFF_SEEN_ON.map(version_text).join(", ")
+}
+
+/// Turn the headphones off over the cable. `Ok` means they accepted the frame. They
+/// then go off within a few seconds: they leave the bus and come back as the control
+/// pipe alone, charging, until they are switched on again with their power button.
+pub fn power_off() -> Result<(), String> {
+    match cable() {
+        None => return Err("The headphones are not plugged in over USB".into()),
+        Some(c) if !c.on => return Err("The headphones are already switched off".into()),
+        Some(c) if !c.can_power_off() => {
+            return Err(format!(
+                "Switching off over USB has only been seen to work on USB device version {}, and these headphones report {}",
+                power_off_versions(),
+                c.version_text().unwrap_or_else(|| "none".into())
+            ));
+        }
+        Some(_) => {}
+    }
+    let (_, mut pipe) = open()?;
+    let mut report = [0u8; 1 + REPORT_LEN];
+    report[0] = REPORT_ID;
+    report[1..1 + POWER_OFF.len()].copy_from_slice(&POWER_OFF);
+    pipe.write(&report).map_err(|e| format!("Could not send ({e})"))?;
+    let deadline = Instant::now() + REPLY_WAIT;
+    let mut buf = [0u8; 64];
+    while Instant::now() < deadline {
+        match pipe.read(&mut buf, Duration::from_millis(100)) {
+            Ok(0) => {}
+            Ok(n) => {
+                let reply = if buf[0] == REPORT_ID { &buf[1..n] } else { &buf[..n] };
+                return match reply {
+                    [REPLY, _, _, _, ACCEPTED, ..] => Ok(()),
+                    _ => Err(format!("The headphones did not take it ({})", note(reply))),
+                };
+            }
+            // The pipe going away under the read is the headphones leaving the bus.
+            Err(_) => return Ok(()),
+        }
+    }
+    Err("The headphones did not answer".into())
 }
 
 /// The headphones on USB, if they are plugged in. This asks the system what it already
@@ -212,6 +275,18 @@ mod tests {
         assert_eq!(Cable { on: true, version: Some(0x2911) }.version_text().as_deref(), Some("29.11"));
         assert_eq!(Cable { on: true, version: Some(0x0105) }.version_text().as_deref(), Some("1.05"));
         assert_eq!(Cable { on: false, version: None }.version_text(), None);
+    }
+
+    #[test]
+    fn offers_power_off_only_where_it_has_been_seen_to_work() {
+        assert!(Cable { on: true, version: Some(0x2911) }.can_power_off());
+        // Already off, another firmware's USB version, and a version nobody could read.
+        assert!(!Cable { on: false, version: Some(0x2911) }.can_power_off());
+        assert!(!Cable { on: true, version: Some(0x2912) }.can_power_off());
+        assert!(!Cable { on: true, version: None }.can_power_off());
+        assert_eq!(power_off_versions(), "29.11");
+        // The frame is the one that was sent by hand: a command, to address 1, group 01, number 04.
+        assert_eq!(hex(&POWER_OFF), "FE 10 01 04");
     }
 
     #[test]

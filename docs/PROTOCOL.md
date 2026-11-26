@@ -61,12 +61,13 @@ The MOMENTUM 5 (`3542:1004`) is reported to have an interface of the same shape.
 **No project documents what it speaks**, and none controls the headphones over the
 cable. `mo4 usb-probe` exists to find out, on Linux and on Windows. MO4 still cannot
 control anything this way. The shape of a frame is worked out and a few frames are
-accepted: one reads a Bluetooth address, one turns the headphones off, and four do
-something that has not been identified. No setting has been read or changed.
+accepted: one reads a Bluetooth address, one switches the headphones off, one of two
+drops the Bluetooth link, and one does something that has not been identified. No
+setting has been read or changed.
 
 Everything below was seen on one unit (an M4AEBT SE on firmware 3.38.3, USB device
 version 29.11, 2026-11-26), first from Linux and then from Windows 11 with the same
-answers. About 330 frames were sent in all.
+answers. About 340 frames were sent in all.
 
 #### Where the format comes from
 
@@ -92,8 +93,8 @@ The length and arguments on the sending side are a reading and have not been tri
 every frame sent so far had zeros there. The reading rests on one answer (status
 `07`, below).
 
-Every frame got exactly one answer, within about 20 ms, except the one that turned the
-headphones off. Nothing arrives unasked: the pipe stays silent while the ear cup is
+Every frame got exactly one answer, within about 20 ms, except one that was sent
+while the headphones were already going off. Nothing arrives unasked: the pipe stays silent while the ear cup is
 tapped and swiped and the headphones are taken off and put on, and so does the
 media-key interface. Over the cable, gestures never reach the computer.
 
@@ -115,7 +116,7 @@ media-key interface. Over the cable, gestures never reach the computer.
   | Status | Seen when |
   |---|---|
   | `00` | the frame was accepted. A length and that many bytes follow when there is something to return |
-  | `03` | some numbers in a known group (`01`/`01`, `03`/`04`, `05`/`01`). Read as: the number is there and something else is wrong |
+  | `03` | some numbers in a known group (`01`/`01`, `03`/`04`, `05`/`01`, `05`/`02`). Read as: the number is there and something else is wrong |
   | `04` | number `00` in every known group, and `06`/`03`, `04`/`04`, `04`/`95`. Read as: the group has no such number |
   | `05` | a group the headphones do not know, or a route nobody answers |
   | `06` | the first byte was not `FE` |
@@ -133,13 +134,14 @@ media-key interface. Over the cable, gestures never reach the computer.
 | `FE 10 06 03` | `FD 01 06 03 04` | Bluetooth battery read `0603` |
 | `FE 10 04 95 12 06`, `FE 10 04 04 95 12 06` | status `04` | vendor `0495` and the model read, with and without a length in front |
 | `FE 10 01 01` | status `03` | |
-| `FE 10 01 02`, `FE 10 01 03`, `FE 10 01 04` | status `00`, nothing returned | **accepted. What they did is not known** |
+| `FE 10 01 02`, `FE 10 01 03` | status `00`, nothing returned | **accepted. One of the two drops the Bluetooth link.** Which one was not noted: the wearer heard it go while the three were replayed 8 seconds apart |
+| `FE 10 01 04` | status `00`, nothing returned | **switches the headphones off**, a few seconds after it is accepted |
 | `FE 10 03 01` | `FD 01 03 01 00 06` and six bytes | **reads a Bluetooth address.** It starts with Sennheiser's `80:C3:BA`, so presumably the headphones' own |
 | `FE 10 03 02` | `FD 01 03 02 07 06` | refused. If the `06` is the length it wants, this writes that address. Do not send it with six bytes |
 | `FE 10 03 03` | status `00`, nothing returned | **accepted. What it did is not known** |
 | `FE 10 03 04` | status `03` | |
 | `FE 10 05 01` | status `03` | |
-| `FE 10 05 02` | no answer | **turns the headphones off** |
+| `FE 10 05 02` | no answer the first time, status `03` on its own | first taken for the power-off, wrongly: the headphones were already going off from `01 04`, sent moments before |
 
 The Bluetooth command words do not work here in any arrangement tried, and the
 dongle's numbers do not line up either: its reads at `01`, `03` and `05` with nothing
@@ -147,12 +149,20 @@ after them are refused, and its firmware read at `12` is not a group at all.
 
 #### Switched off and plugged in
 
-After `FE 10 05 02` the headphones left the bus and came back within seconds as
-a different device: the same ids, a different serial string, and the control pipe as
-the only interface, with no audio and no media keys. They stayed that way across a
-replug. Switching them on with the button brought the full device back, with its old
-serial string. So this is what the headphones look like when they are off and
-charging, and the pipe is still there. Nothing has been sent to it in that state.
+A few seconds after `FE 10 01 04` is accepted the headphones play their power-off
+sound, leave the bus and come back as a different device: the same ids, a different
+serial string, and the control pipe as the only interface, with no audio and no media
+keys. They stay that way across a replug. Switching them on with the button brings the
+full device back, with its old serial string. So this is what the headphones look like
+when they are off and charging, and the pipe is still there. Nothing has been sent to
+it in that state.
+
+It is not certain that this is the same "off" as the power button's. The one time it
+was watched closely the headphones were being worn, the two other accepted frames of
+group `01` had been sent 16 and 8 seconds before, and after the power-off sound noise
+canceling stayed active with no audio playing, until the headphones were restarted by
+hand. Whether `01 04` on its own does the same, and whether noise canceling stays on
+when the headphones are not being worn, has not been tried.
 
 This may also be what happened in the first session on Linux, where between two
 writes the USB function dropped and came back twice within three seconds, once
@@ -160,19 +170,26 @@ briefly with a different serial string. What caused that is still not known.
 
 The window uses this difference, and sends nothing to do it. With no Bluetooth link it
 asks the system whether `3542:1000` is plugged in and whether it has its other
-interfaces, and says "on USB" or "on USB, switched off" accordingly. The switched-on
-case has been seen on Windows 11. The switched-off case and both cases on Linux have
-not been run.
+interfaces, and says "on USB" or "on USB, switched off" accordingly. Both cases have
+been seen on Windows 11. Neither has been run on Linux.
+
+With the headphones switched on, the card in the window has a SWITCH OFF key that asks
+twice and then sends `FE 10 01 04`, and `mo4 usb-off` does the same. Both refuse unless
+the headphones report the USB device version the frame was seen on (29.11), because
+nothing says other firmware gives that number the same meaning. The frame they send
+has switched these headphones off once, in the run described above, and has not yet
+been sent on its own.
 
 #### Before sending anything else
 
-- **The headphones act on what they accept.** One frame turned them off. Four more
-  were accepted with zeros for arguments and returned nothing, and the settings were
-  not read back over Bluetooth afterwards, so what those four did is open. A status
-  `00` with nothing after it is not a harmless answer.
+- **The headphones act on what they accept.** One frame switches them off and
+  another drops Bluetooth. One more (`03 03`) was accepted with zeros for arguments
+  and returned nothing, and the settings were not read back over Bluetooth afterwards,
+  so what it did is open. A status `00` with nothing after it is not a harmless answer.
 - **Do not walk through the numbers of a group.** That is how the power-off was
-  found, ten frames into a walk through four numbers of three groups. A walk through
-  the groups with number `00` was harmless only because no group has a number `00`.
+  found, and it was first pinned on the wrong frame, because the headphones take a few
+  seconds to go off and six more frames went out in that time. A walk through the
+  groups with number `00` was harmless only because no group has a number `00`.
 - Group `03` holds the Bluetooth address, and number `02` looks like its write.
 - The dongle has a factory reset at `13` and a disconnect at `14`. Those two groups
   are the only ones not tried, and whether the headphones know them is not known.

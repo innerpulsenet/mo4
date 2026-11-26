@@ -71,6 +71,9 @@ pub enum Msg {
     Set(Setting),
     Refresh,
     Reconnect,
+    /// Switch the headphones off over the USB cable. Acted on only while they are on
+    /// USB with no control link, which is the only time the window offers it.
+    PowerOff,
     Quit,
 }
 
@@ -200,6 +203,11 @@ impl Worker {
                     }
                     Ok(Msg::Set(_)) => self.update(|s| s.busy = false),
                     Ok(Msg::Refresh) => {}
+                    Ok(Msg::PowerOff) if self.target.sim => {}
+                    Ok(Msg::PowerOff) => match usb::power_off() {
+                        Ok(()) => self.log(Tone::Good, "Switching the headphones off over USB: they go off in a few seconds"),
+                        Err(e) => self.log(Tone::Bad, format!("Switch off over USB: {e}")),
+                    },
                 }
             };
         }
@@ -240,6 +248,7 @@ impl Worker {
                         todo.push(s);
                     }
                     Ok(Msg::Refresh) => refresh = true,
+                    Ok(Msg::PowerOff) => {}
                     Ok(Msg::Reconnect) => return Outcome::Reconnect,
                     Ok(Msg::Quit) | Err(mpsc::TryRecvError::Disconnected) => return Outcome::Quit,
                     Err(mpsc::TryRecvError::Empty) => break,

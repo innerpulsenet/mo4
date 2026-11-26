@@ -54,6 +54,8 @@ struct App {
     hint: Option<&'static str>,
     /// When DELETE was first pressed: a second press within a few seconds removes the preset.
     delete_asked: Option<Instant>,
+    /// The same for SWITCH OFF on the USB card.
+    off_asked: Option<Instant>,
     shot: Option<Shot>,
 }
 
@@ -98,6 +100,7 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
                 online_since: None,
                 hint: None,
                 delete_asked: None,
+                off_asked: None,
                 shot: shot.map(|(path, delay)| Shot { path, frames: 0, requested: false, started: Instant::now(), delay }),
             }))
         }),
@@ -767,6 +770,34 @@ impl App {
         let key = Rect::from_min_size(pos2(card.left() + 28.0, y), vec2(110.0, 28.0));
         if widgets::key(ui, key, "retry", "LOOK AGAIN", false, TINT, !searching, false).clicked() {
             self.session.send(Msg::Reconnect);
+        }
+        // The one thing the cable is known to do. Like DELETE, it asks twice.
+        let cable = match &self.snap.link {
+            LinkState::Usb(cable, _) if cable.on => *cable,
+            _ => return,
+        };
+        let can = cable.can_power_off();
+        let asked = can && self.off_asked.is_some_and(|at| at.elapsed() < Duration::from_secs(4));
+        if !asked {
+            self.off_asked = None;
+        }
+        let label = if asked { "REALLY?" } else { "SWITCH OFF" };
+        let tip = if !can {
+            format!("Switching off over the cable has only been seen to work on USB device version {}", crate::link::usb::power_off_versions())
+        } else if asked {
+            "Press again to switch the headphones off".to_owned()
+        } else {
+            "Switch the headphones off over the cable. They stay plugged in and charging, and come back on with their power button".to_owned()
+        };
+        let key = Rect::from_min_size(pos2(key.right() + 8.0, y), vec2(110.0, 28.0));
+        if widgets::key(ui, key, "usb-off", label, asked, steel::ERR, can, false).on_hover_text(tip).clicked() {
+            if asked {
+                self.off_asked = None;
+                self.session.send(Msg::PowerOff);
+            } else {
+                self.off_asked = Some(Instant::now());
+                ui.ctx().request_repaint_after(Duration::from_secs(4));
+            }
         }
     }
 
