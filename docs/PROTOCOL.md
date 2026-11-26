@@ -157,12 +157,13 @@ full device back, with its old serial string. So this is what the headphones loo
 when they are off and charging, and the pipe is still there. Nothing has been sent to
 it in that state.
 
-It is not certain that this is the same "off" as the power button's. The one time it
-was watched closely the headphones were being worn, the two other accepted frames of
-group `01` had been sent 16 and 8 seconds before, and after the power-off sound noise
-canceling stayed active with no audio playing, until the headphones were restarted by
-hand. Whether `01 04` on its own does the same, and whether noise canceling stays on
-when the headphones are not being worn, has not been tried.
+This is not quite the power button's "off". Both times it was watched the headphones
+were being worn, and after the power-off sound noise canceling stayed active, with no
+audio playing. The first time the two other accepted frames of group `01` had been
+sent 16 and 8 seconds before. The second time `01 04` was sent alone, and it was the
+same. Switched on again with the button, the headphones said "connected" as usual.
+Whether noise canceling also stays on when the headphones are not being worn, and how
+long it stays on, has not been tried.
 
 This may also be what happened in the first session on Linux, where between two
 writes the USB function dropped and came back twice within three seconds, once
@@ -176,9 +177,10 @@ been seen on Windows 11. Neither has been run on Linux.
 With the headphones switched on, the card in the window has a SWITCH OFF key that asks
 twice and then sends `FE 10 01 04`, and `mo4 usb-off` does the same. Both refuse unless
 the headphones report the USB device version the frame was seen on (29.11), because
-nothing says other firmware gives that number the same meaning. The frame they send
-has switched these headphones off once, in the run described above, and has not yet
-been sent on its own.
+nothing says other firmware gives that number the same meaning. `mo4 usb-off` has been
+run on Windows 11 against these headphones with nothing sent before it: the frame was
+accepted at once and the headphones went off about five seconds later. A second run
+then said they were already off and sent nothing.
 
 #### Before sending anything else
 
