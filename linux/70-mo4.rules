@@ -1,0 +1,6 @@
+# MO4: let the logged-in desktop user open the MOMENTUM 4's USB HID interfaces without
+# root. Only the experimental `mo4 usb-probe` needs this; normal control is Bluetooth.
+# Install to /etc/udev/rules.d/, then
+#   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw --action=change
+# (or replug the cable).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3542", ATTRS{idProduct}=="1000", TAG+="uaccess"

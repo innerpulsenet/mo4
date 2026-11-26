@@ -1,0 +1,715 @@
+//! The window: one plate of brushed steel with the headphones' controls let into it.
+
+mod shot;
+#[allow(dead_code)]
+mod steel;
+mod widgets;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use egui::{Align2, Color32, CornerRadius, FontFamily, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+
+use crate::cli::hz_label;
+use crate::device::{self, ANTI_WIND, AUTO_OFF, NoiseMode, SIDETONE_MAX, Setting};
+use crate::link::Target;
+use crate::session::{LinkState, Msg, Session, Snapshot, Tone};
+use crate::store::{self, Preset};
+use steel::LampShape;
+use widgets::{TINT, mono, mono_bold, sans, semi};
+
+/// How long a control keeps showing what the hand set before the headphones' own
+/// report takes over again.
+const HOLD: Duration = Duration::from_millis(700);
+/// The least time between frames sent while a control is being dragged.
+const DRAG_PACE: Duration = Duration::from_millis(150);
+
+struct Shot {
+    path: String,
+    frames: u32,
+    requested: bool,
+    started: Instant,
+    /// Wait this long before the picture instead of taking it as soon as the window is up.
+    delay: Duration,
+}
+
+struct App {
+    session: Session,
+    snap: Snapshot,
+    presets: Vec<Preset>,
+    /// What the hand last set, by setting slot, until the headphones confirm.
+    holds: HashMap<u8, (Setting, Instant)>,
+    /// A dragged value that has not gone out yet.
+    unsent: Option<Setting>,
+    last_sent: Instant,
+    band: Option<usize>,
+    naming: Option<String>,
+    notice: Option<(String, Tone, Instant)>,
+    show_log: bool,
+    shot: Option<Shot>,
+}
+
+/// The held value of one kind of setting, if the hand set it a moment ago.
+macro_rules! held {
+    ($self:ident, $variant:ident) => {
+        $self.holds.values().find_map(|(s, _)| if let Setting::$variant(v) = s { Some(v.clone()) } else { None })
+    };
+}
+
+pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Result<(), String> {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("MO4")
+        .with_app_id("mo4")
+        .with_inner_size([1180.0, 760.0])
+        .with_min_inner_size([1080.0, 740.0])
+        .with_icon(egui::IconData { rgba: include_bytes!("../../assets/icon-256.rgba").to_vec(), width: 256, height: 256 })
+        .with_decorations(false);
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    eframe::run_native(
+        "MO4",
+        options,
+        Box::new(move |cc| {
+            install_fonts(&cc.egui_ctx);
+            steel::install(&cc.egui_ctx, TINT);
+            if reduced_motion() {
+                cc.egui_ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            }
+            let ctx = cc.egui_ctx.clone();
+            let session = Session::start(target, trace, Box::new(move || ctx.request_repaint()));
+            Ok(Box::new(App {
+                snap: session.snapshot(),
+                session,
+                presets: store::load_presets(),
+                holds: HashMap::new(),
+                unsent: None,
+                last_sent: Instant::now(),
+                band: None,
+                naming: None,
+                notice: None,
+                show_log: false,
+                shot: shot.map(|(path, delay)| Shot { path, frames: 0, requested: false, started: Instant::now(), delay }),
+            }))
+        }),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::empty();
+    let mut add = |name: &str, bytes: &'static [u8]| {
+        fonts.font_data.insert(name.into(), Arc::new(egui::FontData::from_static(bytes)));
+    };
+    add("sans", include_bytes!("../../assets/fonts/InstrumentSans-Regular.ttf"));
+    add("sans-semi", include_bytes!("../../assets/fonts/InstrumentSans-SemiBold.ttf"));
+    add("mono", include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf"));
+    add("mono-bold", include_bytes!("../../assets/fonts/JetBrainsMono-SemiBold.ttf"));
+    add("display", include_bytes!("../../assets/fonts/Syne-ExtraBold.ttf"));
+    let family = |names: &[&str]| names.iter().map(|n| (*n).to_string()).collect::<Vec<_>>();
+    fonts.families.insert(FontFamily::Proportional, family(&["sans", "mono"]));
+    fonts.families.insert(FontFamily::Monospace, family(&["mono"]));
+    fonts.families.insert(FontFamily::Name("semi".into()), family(&["sans-semi", "mono"]));
+    fonts.families.insert(FontFamily::Name("mono-bold".into()), family(&["mono-bold"]));
+    fonts.families.insert(FontFamily::Name("display".into()), family(&["display"]));
+    ctx.set_fonts(fonts);
+}
+
+impl eframe::App for App {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        steel::PLATE.to_normalized_gamma_f32()
+    }
+
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.snap = self.session.snapshot();
+        let busy = self.snap.busy;
+        self.holds.retain(|_, (_, at)| busy || at.elapsed() < HOLD);
+        let pointer_down = ctx.input(|i| i.pointer.primary_down());
+        if self.unsent.is_some() && (!pointer_down || self.last_sent.elapsed() >= DRAG_PACE) {
+            let s = self.unsent.take().unwrap();
+            self.send(s);
+        }
+        if !self.holds.is_empty() || self.unsent.is_some() || self.notice.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        if self.notice.as_ref().is_some_and(|n| n.2.elapsed() > Duration::from_secs(6)) {
+            self.notice = None;
+        }
+
+        let full = ctx.viewport_rect();
+        steel::paint_plate(ui.painter(), full, steel::PLATE);
+        let online = self.snap.link == LinkState::Online;
+
+        let bar = Rect::from_min_max(full.min, pos2(full.right(), full.top() + 46.0));
+        self.titlebar(ui, bar);
+        steel::groove_h(ui.painter(), full.left(), full.right(), bar.bottom());
+
+        let foot = Rect::from_min_max(pos2(full.left(), full.bottom() - 30.0), full.max);
+        steel::groove_h(ui.painter(), full.left(), full.right(), foot.top() - 2.0);
+
+        let body = Rect::from_min_max(pos2(full.left() + 12.0, bar.bottom() + 14.0), pos2(full.right() - 12.0, foot.top() - 12.0));
+        let gap = 10.0;
+        let left = Rect::from_min_max(body.min, pos2(body.left() + 268.0, body.bottom()));
+        let right = Rect::from_min_max(pos2(body.right() - 284.0, body.top()), body.max);
+        let center = Rect::from_min_max(pos2(left.right() + gap, body.top()), pos2(right.left() - gap, body.bottom()));
+        let device_r = Rect::from_min_max(right.min, pos2(right.right(), right.top() + 296.0));
+        let settings_r = Rect::from_min_max(pos2(right.left(), device_r.bottom() + gap), right.max);
+
+        self.noise_panel(ui, left, online);
+        self.eq_panel(ui, center, online);
+        self.device_panel(ui, device_r);
+        self.settings_panel(ui, settings_r, online);
+        self.footer(ui, foot);
+        if !online {
+            self.offline_card(ui, body);
+        }
+        if self.show_log {
+            self.log_card(ui, foot);
+        }
+        steel::resize_edges(&ctx);
+        steel::outline(&ctx);
+        self.take_shot(&ctx, online);
+    }
+}
+
+impl App {
+    fn send(&mut self, s: Setting) {
+        self.holds.insert(s.slot(), (s.clone(), Instant::now()));
+        self.last_sent = Instant::now();
+        self.session.send(Msg::Set(s));
+    }
+
+    /// A value from a control that is being dragged: shown at once, sent at a steady pace.
+    fn drag(&mut self, s: Setting, released: bool) {
+        self.holds.insert(s.slot(), (s.clone(), Instant::now()));
+        if released || self.last_sent.elapsed() >= DRAG_PACE {
+            self.unsent = None;
+            self.send(s);
+        } else {
+            self.unsent = Some(s);
+        }
+    }
+
+    fn note(&mut self, text: impl Into<String>, tone: Tone) {
+        self.notice = Some((text.into(), tone, Instant::now()));
+    }
+
+    fn titlebar(&mut self, ui: &mut Ui, bar: Rect) {
+        steel::title_drag(ui, bar);
+        let p = ui.painter().clone();
+        let ctx = ui.ctx().clone();
+        widgets::mark(&p, Rect::from_center_size(pos2(bar.left() + 26.0, bar.center().y), vec2(24.0, 22.0)), steel::EMBER);
+        let word = steel::steel_text(&p, pos2(bar.left() + 46.0, bar.center().y + 0.5), Align2::LEFT_CENTER, "MO4", widgets::display(21.0));
+        widgets::legend(&p, pos2(word.right() + 14.0, bar.center().y + 1.0), Align2::LEFT_CENTER, "headphone control", 9.5, steel::TEXT_3);
+
+        let mut x = bar.right() - 8.0;
+        for which in [2u8, 1, 0] {
+            let r = Rect::from_min_max(pos2(x - 34.0, bar.top() + 9.0), pos2(x, bar.bottom() - 9.0));
+            if widgets::window_key(ui, r, which).clicked() {
+                match which {
+                    0 => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+                    1 => {
+                        let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                    }
+                    _ => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                }
+            }
+            x -= 36.0;
+        }
+        x -= 8.0;
+        let d = &self.snap.dev;
+        let (text, lamp) = match &self.snap.link {
+            LinkState::Online => {
+                let name = d.model.clone().unwrap_or_else(|| "HEADPHONES".into()).to_uppercase();
+                let battery = d.battery.map_or(String::new(), |b| format!("  {b}%"));
+                (format!("{name}{battery}"), (steel::OK, LampShape::Round, 1.0))
+            }
+            LinkState::Searching(_) => ("SEARCHING".to_string(), (steel::AMBER, LampShape::Round, pulse(&ctx))),
+            LinkState::Offline(_) => ("NOT CONNECTED".to_string(), (steel::ERR, LampShape::Square, 1.0)),
+        };
+        let chip = widgets::chip(&p, pos2(x, bar.center().y), &text, Some(lamp));
+        if self.snap.sim {
+            widgets::chip(&p, pos2(chip.left() - 8.0, bar.center().y), "SIMULATOR: MADE-UP DEVICE", Some((steel::WARN, LampShape::Triangle, 1.0)));
+        }
+    }
+
+    fn noise_panel(&mut self, ui: &mut Ui, r: Rect, online: bool) {
+        let p = ui.painter().clone();
+        let inner = widgets::section(&p, r, "noise control");
+        let d = self.snap.dev.clone();
+        let mode = held!(self, NoiseMode).or(d.noise_mode());
+        let mut y = inner.top();
+
+        let row = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 28.0));
+        let current = mode.and_then(|m| NoiseMode::ALL.iter().position(|x| *x == m));
+        if let Some(i) = widgets::selector(ui, row, "noise-mode", &["ADAPTIVE", "CUSTOM", "OFF"], current, TINT, online && d.anc.is_some()) {
+            self.send(Setting::NoiseMode(NoiseMode::ALL[i]));
+        }
+        y += 28.0 + 10.0;
+
+        let dial = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 206.0));
+        let level = held!(self, NoiseLevel).or(d.noise_level);
+        let turnable = online && mode == Some(NoiseMode::Custom);
+        let idle = match (online, mode) {
+            (false, _) => "NO READING",
+            (_, Some(NoiseMode::Adaptive)) => "ADAPTIVE",
+            (_, Some(NoiseMode::Off)) => "OFF",
+            _ => "NO READING",
+        };
+        let ev = widgets::noise_dial(ui, dial, level.filter(|_| turnable), turnable, idle);
+        if let Some(v) = ev.value {
+            self.drag(Setting::NoiseLevel(v), ev.released);
+        }
+        y += 206.0 + 6.0;
+
+        let words = match (online, mode) {
+            (false, _) => "",
+            (_, Some(NoiseMode::Adaptive)) => "The headphones set the level from the noise around you.",
+            (_, Some(NoiseMode::Custom)) => "Turn the dial: left cancels noise, right lets the outside in.",
+            (_, Some(NoiseMode::Off)) => "Noise control is off. Pick Adaptive or Custom to use the dial.",
+            _ => "The headphones did not report their noise control mode.",
+        };
+        let g = p.layout(words.to_owned(), sans(12.0), steel::TEXT_2, inner.width());
+        p.galley(pos2(inner.left(), y), g, steel::TEXT_2);
+        y += 40.0;
+
+        widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), "anti-wind");
+        y += 18.0;
+        let row = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 26.0));
+        let wind = held!(self, AntiWind).or(d.anti_wind);
+        let labels: Vec<String> = ANTI_WIND.iter().map(|s| s.to_uppercase()).collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        if let Some(i) = widgets::selector(ui, row, "anti-wind", &labels, wind.map(usize::from), TINT, online && d.anti_wind.is_some()) {
+            self.send(Setting::AntiWind(i as u8));
+        }
+        y += 26.0 + 12.0;
+
+        let row = |y: f32| Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 28.0));
+        let th = held!(self, TransparentHearing).or(d.transparent_hearing);
+        if let Some(v) = widgets::switch_row(ui, row(y), "th", "Transparent hearing", "Let the outside in. Turning noise cancelling on switches this off", th, online) {
+            self.send(Setting::TransparentHearing(v));
+        }
+        y += 30.0;
+        let pause = held!(self, PauseOnTransparency).or(d.pause_on_transparency);
+        if let Some(v) = widgets::switch_row(ui, row(y), "th-pause", "Pause when transparent", "Pause playback while transparent hearing is on", pause, online) {
+            self.send(Setting::PauseOnTransparency(v));
+        }
+        y += 30.0 + 10.0;
+
+        if inner.bottom() - y > 44.0 {
+            let title = match d.max_connections {
+                Some(n) => format!("paired devices, {n} at once"),
+                None => "paired devices".into(),
+            };
+            widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), &title);
+            y += 20.0;
+            if d.paired.is_empty() {
+                p.text(pos2(inner.left(), y + 8.0), Align2::LEFT_CENTER, if online { "not reported" } else { "no reading" }, mono(11.0), steel::alpha(steel::TEXT_3, 0.7));
+            }
+            let rows = ((inner.bottom() - y) / 20.0).floor() as usize;
+            for (i, dev) in d.paired.iter().enumerate().take(rows) {
+                let cy = y + 9.0 + i as f32 * 20.0;
+                if i + 1 == rows && d.paired.len() > rows {
+                    p.text(pos2(inner.left(), cy), Align2::LEFT_CENTER, format!("and {} more", d.paired.len() - i), mono(11.0), steel::TEXT_3);
+                    break;
+                }
+                steel::lamp(&p, pos2(inner.left() + 5.0, cy), 3.2, steel::MINT, if dev.connected { 1.0 } else { 0.0 }, LampShape::Round);
+                let name = if dev.name.is_empty() { "unnamed device" } else { dev.name.as_str() };
+                let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 62.0, cy + 10.0)));
+                clip.text(pos2(inner.left() + 16.0, cy), Align2::LEFT_CENTER, name, sans(12.0), if dev.connected { steel::TEXT } else { steel::TEXT_3 });
+                p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, if dev.connected { "LINKED" } else { "AWAY" }, mono_bold(8.5), steel::TEXT_3);
+            }
+        }
+    }
+
+    fn eq_panel(&mut self, ui: &mut Ui, r: Rect, online: bool) {
+        let p = ui.painter().clone();
+        let d = self.snap.dev.clone();
+        let bands = d.eq.map_or(5, |c| usize::from(c.bands));
+        let inner = widgets::section(&p, r, &format!("equalizer, {bands}-band, kept on the headphones"));
+        let usable = online && d.eq_supported() && d.eq_gains.is_some();
+        let (min, max) = d.eq.map_or((-60, 60), |c| (c.min, c.max));
+        let device_curve = d.eq_gains.clone();
+        let shown = held!(self, EqGains).or(device_curve.clone()).unwrap_or_else(|| vec![0; bands]);
+        let sound_mode = held!(self, SoundMode).or(d.sound_mode);
+        let audible = sound_mode == Some(1);
+
+        // Status at the left, the sound mode at the right.
+        let top = Rect::from_min_max(inner.min, pos2(inner.right(), inner.top() + 26.0));
+        let (word, color, shape, lit) = if !online {
+            ("NO READING", steel::TEXT_3, LampShape::Round, 0.0)
+        } else if !usable {
+            ("NEEDS FIRMWARE 3.18 OR NEWER", steel::WARN, LampShape::Triangle, 1.0)
+        } else if !audible {
+            ("BYPASSED", steel::TEXT_3, LampShape::Round, 0.0)
+        } else if Some(&shown) != device_curve.as_ref() {
+            ("SENDING", TINT, LampShape::Round, pulse(ui.ctx()))
+        } else {
+            ("ON THE HEADPHONES", steel::OK, LampShape::Round, 1.0)
+        };
+        steel::lamp(&p, pos2(top.left() + 5.0, top.center().y), 3.6, color, lit, shape);
+        p.text(pos2(top.left() + 17.0, top.center().y), Align2::LEFT_CENTER, word, mono_bold(10.5), steel::TEXT_2);
+        let sel = Rect::from_min_max(pos2(top.right() - 268.0, top.top()), top.max);
+        let current = sound_mode.filter(|m| *m <= 2).map(usize::from);
+        if let Some(i) = widgets::selector(ui, sel, "sound-mode", &["OFF", "EQUALIZER", "PODCAST"], current, TINT, online && d.sound_mode.is_some()) {
+            self.send(Setting::SoundMode(i as u16));
+        }
+        if sound_mode == Some(3) {
+            p.text(pos2(sel.left() - 10.0, top.center().y), Align2::RIGHT_CENTER, "PERSONALIZED (SET IN THE PHONE APP)", mono_bold(9.0), steel::TEXT_3);
+        }
+
+        let keys_y = inner.bottom() - 26.0;
+        let list = Rect::from_min_max(pos2(inner.left(), top.bottom() + 12.0), pos2(inner.left() + 178.0, keys_y - 12.0));
+        let graph = Rect::from_min_max(pos2(list.right() + 12.0, list.top()), pos2(inner.right(), list.bottom()));
+
+        // Presets: kept in this app, applied by sending their curve.
+        steel::well(&p, list, None);
+        let mut apply: Option<Vec<i8>> = None;
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list.shrink2(vec2(1.0, 3.0))).id_salt("presets"));
+        child.set_clip_rect(list.shrink(1.0));
+        child.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        egui::ScrollArea::vertical().show(&mut child, |ui| {
+            for preset in self.presets.iter().filter(|x| x.gains.len() == bands) {
+                let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), if usable { Sense::click() } else { Sense::hover() });
+                let active = usable && preset.gains == shown;
+                let rp = widgets::painter(ui, usable);
+                let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered() && usable);
+                if active || hover > 0.0 {
+                    rp.rect_filled(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), steel::alpha(if active { TINT } else { steel::TEXT }, if active { 0.14 } else { 0.05 * hover }));
+                }
+                if active {
+                    rp.rect_filled(Rect::from_min_size(row.min + vec2(2.0, 7.0), vec2(2.0, row.height() - 14.0)), CornerRadius::same(1), TINT);
+                }
+                let text_clip = rp.with_clip_rect(Rect::from_min_max(row.min, pos2(row.right() - 46.0, row.bottom())).intersect(rp.clip_rect()));
+                text_clip.text(row.min + vec2(11.0, 6.0), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
+                text_clip.text(row.min + vec2(11.0, 21.0), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
+                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 10.0), pos2(row.right() - 9.0, row.bottom() - 10.0)), &preset.gains, if active { TINT } else { steel::TEXT_3 });
+                if resp.clicked() {
+                    apply = Some(preset.gains.clone());
+                }
+            }
+        });
+        if let Some(gains) = apply {
+            self.send(Setting::EqGains(gains));
+        }
+
+        let labels: Vec<String> = (0..bands).map(|i| d.eq_freqs.get(i).copied().flatten().map_or_else(|| format!("band {}", i + 1), hz_label)).collect();
+        let view = widgets::EqView { shown: &shown, device: device_curve.as_deref(), labels: &labels, min, max, audible, enabled: usable };
+        let ev = widgets::eq_editor(ui, graph, &view, &mut self.band);
+        if let Some(curve) = ev.curve {
+            self.drag(Setting::EqGains(curve), ev.released);
+        }
+        if online && usable {
+            p.text(pos2(graph.right() - 10.0, graph.top() + 11.0), Align2::RIGHT_CENTER, "BANDS AS THE HEADPHONES REPORT THEM, HZ", mono_bold(8.5), steel::alpha(steel::TEXT_3, 0.8));
+        }
+
+        // Keys under the screen.
+        let key_at = |x: f32, w: f32| Rect::from_min_max(pos2(x, keys_y), pos2(x + w, keys_y + 26.0));
+        if widgets::key(ui, key_at(inner.left(), 60.0), "flat", "FLAT", false, TINT, usable, false).on_hover_text("Set every band to 0 dB").clicked() {
+            self.send(Setting::EqGains(vec![0; bands]));
+        }
+        let bass = held!(self, BassBoost).or(d.bass_boost);
+        let bass_key = widgets::key(ui, key_at(inner.left() + 66.0, 106.0), "bass", "BASS BOOST", bass == Some(true), TINT, online && bass.is_some(), true);
+        if bass_key.on_hover_text(if bass.is_some() { "The headphones' own bass boost, on top of the curve" } else { "The headphones did not report this setting" }).clicked() {
+            self.send(Setting::BassBoost(bass != Some(true)));
+        }
+
+        let own = self.presets.iter().position(|x| !x.builtin && x.gains == shown);
+        let right = inner.right();
+        if let Some(mut name) = self.naming.take() {
+            let field = Rect::from_min_max(pos2(right - 318.0, keys_y), pos2(right - 138.0, keys_y + 26.0));
+            steel::well(&p, field, Some(TINT));
+            let edit = egui::TextEdit::singleline(&mut name).hint_text("name this curve").font(sans(12.5)).frame(egui::Frame::NONE).margin(egui::Margin::symmetric(8, 5)).char_limit(24);
+            let resp = ui.put(field, edit);
+            if !resp.has_focus() && !resp.lost_focus() {
+                resp.request_focus();
+            }
+            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let save = widgets::key(ui, key_at(right - 132.0, 60.0), "save", "SAVE", false, TINT, !name.trim().is_empty(), false).clicked() || enter;
+            let cancel = widgets::key(ui, key_at(right - 66.0, 66.0), "cancel", "CANCEL", false, TINT, true, false).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+            if save && !name.trim().is_empty() {
+                self.save_preset(name.trim(), shown.clone());
+            } else if !cancel {
+                self.naming = Some(name);
+            }
+        } else {
+            if widgets::key(ui, key_at(right - 152.0, 78.0), "save-as", "SAVE AS", false, TINT, usable, false).on_hover_text("Keep this curve as a preset of your own").clicked() {
+                self.naming = Some(String::new());
+            }
+            if widgets::key(ui, key_at(right - 68.0, 68.0), "delete", "DELETE", false, TINT, usable && own.is_some(), false).on_hover_text("Remove the selected preset of your own").clicked() {
+                if let Some(i) = own {
+                    let gone = self.presets.remove(i);
+                    match store::save_presets(&self.presets) {
+                        Ok(()) => self.note(format!("Preset \"{}\" removed", gone.name), Tone::Info),
+                        Err(e) => self.note(format!("Could not save presets: {e}"), Tone::Bad),
+                    }
+                }
+            }
+        }
+    }
+
+    fn save_preset(&mut self, name: &str, gains: Vec<i8>) {
+        if self.presets.iter().any(|x| x.builtin && x.name.eq_ignore_ascii_case(name)) {
+            self.note(format!("\"{name}\" is a built-in preset; pick another name"), Tone::Bad);
+            self.naming = Some(name.to_string());
+            return;
+        }
+        self.presets.retain(|x| !x.name.eq_ignore_ascii_case(name));
+        self.presets.push(Preset { name: name.to_string(), note: "yours".into(), gains, builtin: false });
+        match store::save_presets(&self.presets) {
+            Ok(()) => self.note(format!("Preset \"{name}\" saved"), Tone::Good),
+            Err(e) => self.note(format!("Could not save presets: {e}"), Tone::Bad),
+        }
+    }
+
+    fn device_panel(&mut self, ui: &mut Ui, r: Rect) {
+        let p = ui.painter().clone();
+        let inner = widgets::section(&p, r, "headphones");
+        let d = &self.snap.dev;
+        let lcd = Rect::from_min_max(inner.min, pos2(inner.right(), inner.top() + 82.0));
+        widgets::battery_lcd(&p, lcd, d.battery, d.charging);
+        let codec = d.codec.map(|c| device::codec_name(c).map_or_else(|| format!("unknown ({c})"), str::to_string));
+        let wear = d.wear.map(|w| device::wear_name(w).map_or_else(|| format!("unknown ({w})"), str::to_string));
+        let firmware = d.firmware_text();
+        let via = (!self.snap.via.is_empty() && self.snap.link == LinkState::Online).then(|| self.snap.via.clone());
+        let facts: [(&str, Option<&str>); 6] = [
+            ("Model", d.model.as_deref()),
+            ("Firmware", firmware.as_deref()),
+            ("Serial", d.serial.as_deref()),
+            ("Codec", codec.as_deref()),
+            ("Wearing", wear.as_deref()),
+            ("Link", via.as_deref()),
+        ];
+        for (i, (name, value)) in facts.iter().enumerate() {
+            let y = lcd.bottom() + 12.0 + i as f32 * 19.5;
+            let row = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 19.0));
+            let clip = p.with_clip_rect(row);
+            // A long link name is cut at the left of its column rather than run over the label.
+            let shown = value.map(|v| if v.chars().count() > 27 { format!("…{}", v.chars().rev().take(26).collect::<Vec<_>>().into_iter().rev().collect::<String>()) } else { v.to_string() });
+            widgets::fact(&clip, row, name, shown.as_deref());
+        }
+        let key = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 26.0), inner.max);
+        let online = self.snap.link == LinkState::Online;
+        if widgets::key(ui, key, "refresh", "READ AGAIN", false, TINT, online, false).on_hover_text("Read every setting from the headphones again").clicked() {
+            self.session.send(Msg::Refresh);
+        }
+    }
+
+    fn settings_panel(&mut self, ui: &mut Ui, r: Rect, online: bool) {
+        let p = ui.painter().clone();
+        let inner = widgets::section(&p, r, "settings");
+        let d = self.snap.dev.clone();
+        let mut y = inner.top() - 2.0;
+        let row = |y: f32| Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 26.0));
+
+        let v = held!(self, OnHeadDetection).or(d.on_head_detection);
+        if let Some(v) = widgets::switch_row(ui, row(y), "on-head", "On-head detection", "Sense whether the headphones are being worn", v, online) {
+            self.send(Setting::OnHeadDetection(v));
+        }
+        y += 28.0;
+        let v = held!(self, SmartPause).or(d.smart_pause);
+        if let Some(v) = widgets::switch_row(ui, row(y), "smart-pause", "Smart pause", "Pause playback when you take the headphones off", v, online) {
+            self.send(Setting::SmartPause(v));
+        }
+        y += 28.0;
+        let v = held!(self, AutoAnswer).or(d.auto_answer);
+        if let Some(v) = widgets::switch_row(ui, row(y), "auto-answer", "Auto answer", "Answer a call by putting the headphones on", v, online) {
+            self.send(Setting::AutoAnswer(v));
+        }
+        y += 28.0;
+        let v = held!(self, ComfortCall).or(d.comfort_call);
+        if let Some(v) = widgets::switch_row(ui, row(y), "comfort-call", "Comfort call", "The headphones' Comfort Call setting for phone calls", v, online) {
+            self.send(Setting::ComfortCall(v));
+        }
+        y += 28.0;
+        let v = held!(self, TouchLock).or(d.touch_lock);
+        if let Some(v) = widgets::switch_row(ui, row(y), "touch-lock", "Touch lock", "Ignore taps and swipes on the ear cup", v, online) {
+            self.send(Setting::TouchLock(v));
+        }
+        y += 28.0 + 8.0;
+
+        widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), "auto power-off, minutes");
+        y += 18.0;
+        let off = held!(self, AutoOff).or(d.auto_off);
+        let current = off.and_then(|s| AUTO_OFF.iter().position(|x| *x == s));
+        if let Some(i) = widgets::selector(ui, row(y), "auto-off", &["NEVER", "15", "30", "60"], current, TINT, online && d.auto_off.is_some()) {
+            self.send(Setting::AutoOff(AUTO_OFF[i]));
+        }
+        y += 26.0 + 12.0;
+
+        widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), "prompts");
+        y += 18.0;
+        let prompts = held!(self, PromptMode).or(d.prompt_mode);
+        if let Some(i) = widgets::selector(ui, row(y), "prompts", &["OFF", "TONES", "VOICE"], prompts.map(usize::from), TINT, online && d.prompt_mode.is_some()) {
+            self.send(Setting::PromptMode(i as u8));
+        }
+        y += 26.0 + 12.0;
+
+        let side = held!(self, Sidetone).or(d.sidetone);
+        let title = match side {
+            Some(v) => format!("sidetone, {v} of {SIDETONE_MAX}"),
+            None => "sidetone, not reported".into(),
+        };
+        widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), &title);
+        y += 16.0;
+        let (moved, released) = widgets::fader(ui, row(y), "sidetone", side.unwrap_or(0).min(SIDETONE_MAX), SIDETONE_MAX, online && side.is_some());
+        if let Some(v) = moved {
+            self.drag(Setting::Sidetone(v), released);
+        }
+    }
+
+    fn footer(&mut self, ui: &mut Ui, foot: Rect) {
+        let p = ui.painter().clone();
+        let cy = foot.center().y;
+        let area = Rect::from_min_max(foot.min, pos2(foot.right() - 130.0, foot.bottom()));
+        let resp = ui.interact(area, ui.id().with("footer"), Sense::click()).on_hover_text("Click for the history");
+        if resp.clicked() {
+            self.show_log = !self.show_log;
+        }
+        let line = match (&self.notice, self.snap.log.back()) {
+            (Some((text, tone, _)), _) => Some((store::clock(), text.clone(), *tone)),
+            (None, Some(l)) => Some((l.at.clone(), l.text.clone(), l.tone)),
+            (None, None) => None,
+        };
+        let line = line.or_else(|| match &self.snap.link {
+            LinkState::Searching(what) => Some((store::clock(), what.clone(), Tone::Info)),
+            LinkState::Offline(why) => Some((store::clock(), why.clone(), Tone::Bad)),
+            LinkState::Online => None,
+        });
+        if let Some((at, text, tone)) = line {
+            let t = p.text(pos2(foot.left() + 16.0, cy), Align2::LEFT_CENTER, at, mono(11.0), steel::TEXT_3);
+            let color = match tone {
+                Tone::Bad => steel::ERR,
+                Tone::Good | Tone::Info => steel::TEXT_2,
+            };
+            let clip = p.with_clip_rect(area);
+            clip.text(pos2(t.right() + 12.0, cy), Align2::LEFT_CENTER, text, mono(11.0), color);
+        }
+        let t = p.text(pos2(foot.right() - 16.0, cy), Align2::RIGHT_CENTER, "innerpulse", mono(11.0), steel::TEXT_3);
+        widgets::mark(&p, Rect::from_center_size(pos2(t.left() - 13.0, cy), vec2(13.0, 12.0)), steel::EMBER);
+    }
+
+    /// The history: a sheet of glass over the foot of the window.
+    fn log_card(&mut self, ui: &mut Ui, foot: Rect) {
+        let lines: Vec<_> = self.snap.log.iter().rev().take(12).collect();
+        let h = 34.0 + lines.len().max(1) as f32 * 19.0;
+        let card = Rect::from_min_max(pos2(foot.left() + 12.0, foot.top() - h - 8.0), pos2(foot.left() + 700.0, foot.top() - 8.0));
+        let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("log-card")));
+        p.rect(card, CornerRadius::same(steel::R_GLASS), steel::alpha(steel::SURFACE_1, 0.97), Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
+        steel::glass(&p, card);
+        widgets::legend(&p, card.min + vec2(14.0, 11.0), Align2::LEFT_TOP, "history", 9.5, steel::TEXT_3);
+        if lines.is_empty() {
+            p.text(card.min + vec2(14.0, 38.0), Align2::LEFT_CENTER, "Nothing has happened yet", mono(11.0), steel::TEXT_3);
+        }
+        for (i, l) in lines.iter().enumerate() {
+            let y = card.top() + 38.0 + i as f32 * 19.0;
+            p.text(pos2(card.left() + 14.0, y), Align2::LEFT_CENTER, &l.at, mono(11.0), steel::TEXT_3);
+            let clip = p.with_clip_rect(card.shrink(8.0));
+            clip.text(pos2(card.left() + 86.0, y), Align2::LEFT_CENTER, &l.text, mono(11.0), if l.tone == Tone::Bad { steel::ERR } else { steel::TEXT_2 });
+        }
+        if ui.input(|i| i.pointer.any_click()) && !ui.rect_contains_pointer(Rect::from_min_max(foot.min, pos2(foot.right() - 130.0, foot.bottom()))) {
+            self.show_log = false;
+        }
+    }
+
+    /// Shown over the controls while there are no headphones to talk to.
+    fn offline_card(&mut self, ui: &mut Ui, body: Rect) {
+        let (title, why, searching) = match &self.snap.link {
+            LinkState::Searching(what) => ("looking for the headphones", what.clone(), true),
+            LinkState::Offline(why) => ("not connected", why.clone(), false),
+            LinkState::Online => return,
+        };
+        let p = ui.painter().clone();
+        let width = 470.0;
+        let text = p.layout(why, sans(13.5), steel::TEXT, width - 56.0);
+        let hint = p.layout(
+            "MO4 talks to the headphones over Bluetooth. Pair and connect them in the system's Bluetooth settings; this window finds them on its own.".to_owned(),
+            sans(12.0),
+            steel::TEXT_3,
+            width - 56.0,
+        );
+        let h = 62.0 + text.size().y + 14.0 + hint.size().y + 60.0;
+        let card = Rect::from_center_size(body.center(), vec2(width, h));
+        // The controls behind have nothing to show: darken them so the card reads alone.
+        p.rect_filled(body.expand(4.0), CornerRadius::same(steel::R_GLASS), Color32::from_black_alpha(96));
+        p.rect(card.expand(1.0).translate(vec2(0.0, 8.0)), CornerRadius::same(steel::R_GLASS + 2), Color32::from_black_alpha(70), Stroke::NONE, StrokeKind::Outside);
+        p.rect(card, CornerRadius::same(steel::R_GLASS), steel::alpha(steel::SURFACE_1, 0.96), Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
+        steel::glass(&p, card);
+        let (color, shape, lit) = if searching { (steel::AMBER, LampShape::Round, pulse(ui.ctx())) } else { (steel::ERR, LampShape::Square, 1.0) };
+        steel::lamp(&p, card.min + vec2(33.0, 33.0), 4.5, color, lit, shape);
+        widgets::legend(&p, card.min + vec2(48.0, 33.0), Align2::LEFT_CENTER, title, 11.0, steel::TEXT_2);
+        let mut y = card.top() + 62.0;
+        let step = text.size().y;
+        p.galley(pos2(card.left() + 28.0, y), text, steel::TEXT);
+        y += step + 14.0;
+        let step = hint.size().y;
+        p.galley(pos2(card.left() + 28.0, y), hint, steel::TEXT_3);
+        y += step + 18.0;
+        let key = Rect::from_min_size(pos2(card.left() + 28.0, y), vec2(110.0, 28.0));
+        if widgets::key(ui, key, "retry", "LOOK AGAIN", false, TINT, !searching, false).clicked() {
+            self.session.send(Msg::Reconnect);
+        }
+    }
+
+    fn take_shot(&mut self, ctx: &egui::Context, online: bool) {
+        let Some(shot) = &mut self.shot else { return };
+        ctx.request_repaint();
+        let image = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        if let Some(image) = image {
+            let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+            if let Err(e) = std::fs::write(&shot.path, shot::png(image.size[0], image.size[1], &rgba)) {
+                eprintln!("mo4: could not write {}: {e}", shot.path);
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if online {
+            shot.frames += 1;
+        }
+        let ready = if shot.delay.is_zero() { shot.frames > 30 || shot.started.elapsed() > Duration::from_secs(4) } else { shot.started.elapsed() > shot.delay };
+        if !shot.requested && ready {
+            shot.requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+        }
+    }
+}
+
+/// A slow breath for a lamp that means "working": 0.35 to 1. Still when the system
+/// asks for reduced motion.
+fn pulse(ctx: &egui::Context) -> f32 {
+    if ctx.global_style().animation_time == 0.0 {
+        return 1.0;
+    }
+    ctx.request_repaint_after(Duration::from_millis(50));
+    let t = ctx.input(|i| i.time) as f32;
+    0.675 + 0.325 * (t * 3.2).sin()
+}
+
+/// Whether the system asks for less motion: KDE's animation speed set to instant, the
+/// Windows "show animations" switch turned off, or `MO4_REDUCED_MOTION=1`.
+fn reduced_motion() -> bool {
+    if std::env::var_os("MO4_REDUCED_MOTION").is_some_and(|v| v == "1") {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let config = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| Some(std::path::PathBuf::from(std::env::var_os("HOME")?).join(".config")));
+        let text = config.and_then(|dir| std::fs::read_to_string(dir.join("kdeglobals")).ok()).unwrap_or_default();
+        text.lines().any(|l| l.strip_prefix("AnimationDurationFactor=").is_some_and(|v| v.trim().parse::<f32>() == Ok(0.0)))
+    }
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
+        let mut animations = windows::core::BOOL(1);
+        let asked = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some((&mut animations as *mut windows::core::BOOL).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
+        asked.is_ok() && !animations.as_bool()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    false
+}

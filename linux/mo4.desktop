@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MO4
+GenericName=Headphone Settings
+Comment=Noise control, equalizer and settings for Sennheiser MOMENTUM 4 headphones
+Exec=mo4
+Icon=mo4
+Terminal=false
+Categories=AudioVideo;Audio;Settings;HardwareSettings;
+Keywords=sennheiser;momentum;headphones;anc;noise;eq;equalizer;bluetooth;innerpulse;
+StartupWMClass=mo4

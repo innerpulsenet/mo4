@@ -1,0 +1,40 @@
+[package]
+name = "mo4"
+version = "0.1.0"
+edition = "2024"
+description = "Desktop control for Sennheiser MOMENTUM 4 headphones: noise control, equalizer and settings"
+publish = false
+
+[dependencies]
+eframe = { version = "0.35", default-features = false, features = ["glow", "wayland", "x11"] }
+egui = { version = "0.35", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Rfcomm",
+    "Devices_Enumeration",
+    "Foundation",
+    "Foundation_Collections",
+    "Networking",
+    "Networking_Sockets",
+    "Storage_Streams",
+    "Win32_System_Console",
+    "Win32_System_SystemInformation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+windows-future = "0.2"
+
+# The exe icon. Build scripts run on the build machine, so this only applies when
+# building on Windows.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+strip = true

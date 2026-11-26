@@ -1,0 +1,39 @@
+name: build
+
+# Tests on Linux, then builds the Linux and Windows programs and keeps them as artifacts.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo build --release
+      - name: Package
+        run: |
+          mkdir -p pkg/mo4/linux
+          cp target/release/mo4 assets/mo4.png README.md pkg/mo4/
+          cp -r linux/install.sh linux/70-mo4.rules linux/mo4.desktop linux/icons pkg/mo4/linux/
+          tar -C pkg -czf mo4-linux-x64.tar.gz mo4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mo4-linux-x64
+          path: mo4-linux-x64.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mo4-windows-x64
+          path: target/release/mo4.exe
