@@ -12,15 +12,15 @@ after you close the app.
 > Over an Intel AX200, MO4 connected to an M4AEBT SE on firmware 3.38.3 at the first
 > attempt, read every setting, and changed one (anti-wind) with the headphones
 > confirming it; what it saw matches [docs/PROTOCOL.md](docs/PROTOCOL.md). The other
-> settings have only been changed on the built-in simulator, and the Windows build is
-> type-checked but has never run. The screenshot above shows the simulator, which the
-> window labels as such.
+> settings have only been changed on the built-in simulator. The Windows program
+> builds and passes its tests on GitHub but has never been run against headphones. The
+> screenshot above shows the simulator, which the window labels as such.
 
 ## What it does
 
 - **Noise control:** Adaptive, Custom or Off. In Custom, one dial runs from full noise
-  cancelling through neutral to full transparency. Anti-wind (off, max, auto),
-  transparent hearing, and pausing while transparent.
+  cancelling through neutral to full transparency: drag it, scroll, or use the arrow
+  keys. Anti-wind (off, auto, max), transparent hearing, and pausing while transparent.
 - **Equalizer:** the headphones' own five-band EQ, edited on a graph. Drag a node,
   scroll over a band or use the arrow keys (half-dB steps, a tenth with Shift);
   double-click a node to zero it. A lamp says whether the curve is on the headphones,
@@ -35,7 +35,8 @@ after you close the app.
 Every value on screen is one the headphones reported. A setting they did not report
 shows as N/A or "not reported" rather than a guess, and after each change the app reads
 the value back and says whether the headphones confirmed it. The line at the bottom
-shows what happened last; click it for the history.
+shows what happened last (click it for the history), or how to work the control under
+the pointer. Every control can be reached with Tab and worked from the keyboard.
 
 ## Connecting
 
@@ -79,6 +80,18 @@ Options: `--addr AA:BB:CC:DD:EE:FF` to use one device instead of searching,
 `--channel N` to name the RFCOMM channel (Linux), `--trace` to print every frame, and
 `--sim` to talk to the built-in simulated headset (made-up values, clearly labeled).
 
+## Install
+
+Each push to `main` builds packages on GitHub; they are attached to the run under
+Actions, and to a release when a version tag is pushed.
+
+- **Linux, Debian or Ubuntu:** `sudo apt install ./mo4_<version>_amd64.deb` (menu
+  entry and icons included).
+- **Linux, anything else:** unpack `mo4-<version>-linux-x64.tar.gz` and run
+  `linux/install.sh`, which installs for your user only.
+- **Windows 11:** unzip `mo4-<version>-windows-x64.zip` and run `mo4.exe`. There is no
+  installer.
+
 ## Build
 
 ```
@@ -86,11 +99,11 @@ cargo build --release
 ```
 
 Rust 1.88 or newer. On Linux, `linux/install.sh` copies the program to `~/.local/bin`
-and adds a menu entry. On Windows, build on Windows (`cargo build --release` gives
-`target\release\mo4.exe`), or take the exe from the GitHub workflow in
-`.github/workflows/build.yml`, which builds and tests both platforms.
+and adds a menu entry, and `linux/package-deb.sh` makes the `.deb`. On Windows, build
+on Windows: `cargo build --release` gives `target\release\mo4.exe`.
 
-`cargo test` runs the protocol, client and command line tests against the simulator.
+`cargo test` runs the protocol, client and command line tests against the simulator
+and against frames captured from real headphones.
 
 ## Files
 

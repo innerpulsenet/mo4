@@ -33,7 +33,7 @@ pub fn display(size: f32) -> FontId {
 pub fn painter(ui: &Ui, enabled: bool) -> Painter {
     let mut p = ui.painter().clone();
     if !enabled {
-        p.multiply_opacity(0.45);
+        p.multiply_opacity(steel::DISABLED_ALPHA);
     }
     p
 }
@@ -82,6 +82,7 @@ fn key_state(ui: &Ui, resp: &Response, on: bool, tint: Color32) -> KeyState {
 }
 
 /// A key in a given rect: lit in `tint` while `on`, with an optional lamp at its left.
+#[allow(clippy::too_many_arguments)]
 pub fn key(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &str, on: bool, tint: Color32, enabled: bool, lamp: bool) -> Response {
     let resp = ui.interact(rect, ui.id().with(id), if enabled { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, label));
@@ -124,15 +125,26 @@ pub fn switch_row(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &
         Some(false) => ("OFF", false),
         None => ("N/A", false),
     };
-    let resp = key(ui, k, id, text, on, TINT, enabled && value.is_some(), value.is_some());
-    let resp = resp.on_hover_text(if value.is_some() { hint } else { "The headphones did not report this setting" });
-    if resp.clicked() { value.map(|v| !v) } else { None }
+    let usable = enabled && value.is_some();
+    // The whole row takes the click, not only the key; the key alone is the tab stop.
+    let row = ui.interact(rect, ui.id().with((&id, "row")), if usable { Sense::CLICK } else { Sense::hover() });
+    let resp = key(ui, k, &id, text, on, TINT, usable, value.is_some());
+    let tip = if value.is_some() { hint } else { "The headphones did not report this setting" };
+    let clicked = resp.clicked() || row.clicked();
+    row.on_hover_text(tip);
+    resp.on_hover_text(tip);
+    if clicked { value.map(|v| !v) } else { None }
 }
 
 /// A horizontal fader with `steps + 1` detents. Returns the detent under the cap when
 /// it moves, and whether the hand has let go.
 pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, value: u8, steps: u8, enabled: bool) -> (Option<u8>, bool) {
     let resp = ui.interact(rect, ui.id().with(id), if enabled { Sense::click_and_drag() } else { Sense::hover() });
+    resp.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(value), "Sidetone"));
+    if resp.clicked() || resp.drag_started() {
+        resp.request_focus();
+    }
+    keep_arrows(ui, &resp, true, false);
     let p = painter(ui, enabled);
     let track = Rect::from_min_max(pos2(rect.left() + 6.0, rect.center().y - 3.0), pos2(rect.right() - 6.0, rect.center().y + 3.0));
     for i in 0..=steps {
@@ -149,7 +161,26 @@ pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, value: u8, st
             out = Some(v);
         }
     }
-    (out, resp.drag_stopped() || resp.clicked())
+    let mut keyed = false;
+    if enabled && resp.has_focus() {
+        let step = ui.input(|i| i32::from(i.key_pressed(egui::Key::ArrowRight)) - i32::from(i.key_pressed(egui::Key::ArrowLeft)));
+        let v = (i32::from(value) + step).clamp(0, i32::from(steps)) as u8;
+        if v != value {
+            out = Some(v);
+            keyed = true;
+        }
+        p.rect_stroke(rect.expand2(vec2(0.0, 1.0)), CornerRadius::same(steel::RADIUS), Stroke::new(1.0, steel::EMBER), StrokeKind::Outside);
+    }
+    (out, resp.drag_stopped() || resp.clicked() || keyed)
+}
+
+/// A focused control that is turned with the arrow keys keeps them, instead of the
+/// arrows moving focus to its neighbor.
+fn keep_arrows(ui: &Ui, resp: &Response, horizontal: bool, vertical: bool) {
+    if resp.has_focus() {
+        let filter = egui::EventFilter { horizontal_arrows: horizontal, vertical_arrows: vertical, ..Default::default() };
+        ui.memory_mut(|m| m.set_focus_lock_filter(resp.id, filter));
+    }
 }
 
 fn polar(c: Pos2, r: f32, angle: f32) -> Pos2 {
@@ -161,71 +192,97 @@ pub struct DialEvent {
     pub released: bool,
 }
 
-/// The noise dial: a knurled cap inside a ring of 25 cells. The middle of the ring is
-/// neutral; cells light toward the left for noise cancelling and toward the right for
-/// transparency. `level` is 0 to 100, or `None` when the headphones have not said.
-pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_word: &str) -> DialEvent {
+/// The noise dial, the window's main instrument: a knurled cap inside a ring of 25
+/// cells with a scale around it. The top of the ring is neutral; cells light to the
+/// left for noise cancelling and to the right for transparency. `level` is 0 to 100,
+/// or `None` when the headphones have not said. `intro` runs 0 to 1 as the dial comes
+/// alive after connecting: the light sweeps out from neutral to the value.
+pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_word: &str, intro: f32) -> DialEvent {
     const CELLS: usize = 25;
-    let c = rect.center() + vec2(0.0, 4.0);
-    let outer = rect.width().min(rect.height()) / 2.0 - 2.0;
+    let outer = (rect.width().min(rect.height()) / 2.0 - 20.0).max(40.0);
+    let c = pos2(rect.center().x, rect.top() + outer + 20.0);
     let resp = ui.interact(Rect::from_center_size(c, vec2(outer * 2.0, outer * 2.0)), ui.id().with("noise-dial"), if enabled { Sense::click_and_drag() } else { Sense::hover() });
+    resp.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(level.unwrap_or(50)), "Noise control level"));
+    if resp.clicked() || resp.drag_started() {
+        resp.request_focus();
+    }
+    keep_arrows(ui, &resp, true, true);
     let live = enabled && level.is_some();
     let p = painter(ui, live);
     let ctx = ui.ctx();
 
     // The value the ring shows glides to where the dial was put.
-    let shown = level.map(|v| ctx.animate_value_with_time(resp.id.with("v"), f32::from(v), ctx.global_style().animation_time.min(0.12)));
+    let shown = level.map(|v| {
+        let v = ctx.animate_value_with_time(resp.id.with("v"), f32::from(v), ctx.global_style().animation_time.min(0.12));
+        50.0 + (v - 50.0) * intro.clamp(0.0, 1.0)
+    });
     let angle_of = |t: f32| PI * 0.75 + t * PI * 1.5;
+    let side = |t: f32| if t < 0.49 { TINT } else if t > 0.51 { TINT_2 } else { steel::TEXT };
+
+    // The scale: a tick and a figure every quarter, strength rising away from the top.
+    for (t, figure) in [(0.0, "100"), (0.25, "50"), (0.5, "0"), (0.75, "50"), (1.0, "100")] {
+        let a = angle_of(t);
+        p.line_segment([polar(c, outer + 3.0, a), polar(c, outer + 7.0, a)], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.45)));
+        p.text(polar(c, outer + 16.0, a), Align2::CENTER_CENTER, figure, mono_bold(8.5), steel::lerp(steel::TEXT_3, side(t), 0.45));
+    }
+    for k in 1..24 {
+        if k % 6 != 0 {
+            let a = angle_of(k as f32 / 24.0);
+            p.line_segment([polar(c, outer + 3.0, a), polar(c, outer + 5.0, a)], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.20)));
+        }
+    }
 
     // The milled slot the cells sit in.
-    let (r0, r1) = (outer - 17.0, outer - 3.0);
-    let arc: Vec<Pos2> = (0..=48).map(|i| polar(c, (r0 + r1) / 2.0, angle_of(i as f32 / 48.0))).collect();
-    p.add(egui::Shape::line(arc.clone(), Stroke::new(r1 - r0 + 6.0, Color32::from_black_alpha(215))));
-    p.add(egui::Shape::line(arc, Stroke::new(r1 - r0 + 4.0, steel::INK)));
+    let (r0, r1) = (outer - 17.0, outer - 2.0);
+    let arc: Vec<Pos2> = (0..=64).map(|i| polar(c, (r0 + r1) / 2.0, angle_of(-0.012 + 1.024 * i as f32 / 64.0))).collect();
+    p.add(egui::Shape::line(arc.clone(), Stroke::new(r1 - r0 + 7.0, Color32::from_black_alpha(215))));
+    p.add(egui::Shape::line(arc, Stroke::new(r1 - r0 + 5.0, steel::INK)));
 
+    let mid = (CELLS as f32 - 1.0) / 2.0;
     let head = shown.map(|v| v / 100.0 * (CELLS as f32 - 1.0));
     for i in 0..CELLS {
-        let t = i as f32 / (CELLS as f32 - 1.0);
-        let a = angle_of(t);
-        let half = 0.042;
-        let quad = vec![polar(c, r0, a - half), polar(c, r1, a - half), polar(c, r1, a + half), polar(c, r0, a + half)];
-        let mid = (CELLS as f32 - 1.0) / 2.0;
         let fi = i as f32;
-        let color = if fi < mid { TINT } else if fi > mid { TINT_2 } else { steel::TEXT };
-        // Lit from the middle out to the head; the head cell burns brightest.
+        let t = fi / (CELLS as f32 - 1.0);
+        let a = angle_of(t);
+        let half = 0.040;
+        let quad = vec![polar(c, r0, a - half), polar(c, r1, a - half), polar(c, r1, a + half), polar(c, r0, a + half)];
+        let color = side(t);
+        // Lit from the top out to the head; the run brightens toward the head, which burns brightest.
         let lit = head.map_or(0.0, |h| {
             let (lo, hi) = if h < mid { (h, mid) } else { (mid, h) };
             if fi < lo - 0.5 || fi > hi + 0.5 {
                 0.0
             } else {
-                let from_head = (fi - h).abs();
-                (1.0 - from_head / (mid + 1.0) * 0.75).clamp(0.25, 1.0) * if from_head < 0.6 { 1.0 } else { 0.72 }
+                let run = (hi - lo).max(1.0);
+                let toward_head = 1.0 - ((fi - h).abs() / run).clamp(0.0, 1.0);
+                if (fi - h).abs() < 0.6 { 1.0 } else { 0.38 + 0.40 * toward_head }
             }
         });
-        let fill = steel::lerp(steel::lerp(steel::SURFACE_2, color, 0.10), steel::lerp(color, Color32::WHITE, 0.25 * lit), lit);
+        let fill = steel::lerp(steel::lerp(steel::SURFACE_2, color, 0.10), steel::lerp(color, Color32::WHITE, 0.30 * lit), lit);
         p.add(egui::Shape::convex_polygon(quad, fill, Stroke::NONE));
         if lit > 0.9 {
-            let glow: Vec<Pos2> = (0..12).map(|k| polar(polar(c, (r0 + r1) / 2.0, a), 13.0, k as f32 / 12.0 * TAU)).collect();
-            steel::radial_fan(&p, polar(c, (r0 + r1) / 2.0, a), &glow, steel::alpha(color, 0.30), steel::alpha(color, 0.0));
+            let at = polar(c, (r0 + r1) / 2.0, a);
+            let glow: Vec<Pos2> = (0..12).map(|k| polar(at, 15.0, k as f32 / 12.0 * TAU)).collect();
+            steel::radial_fan(&p, at, &glow, steel::alpha(color, 0.34), steel::alpha(color, 0.0));
         }
     }
 
     // The cap: machined metal, knurled around its edge, lit from above.
-    let cap = r0 - 9.0;
-    p.circle_filled(c + vec2(0.0, 2.5), cap + 2.0, Color32::from_black_alpha(150));
-    let rim: Vec<Pos2> = (0..64).map(|k| polar(c, cap, k as f32 / 64.0 * TAU)).collect();
-    steel::radial_fan(&p, c + vec2(0.0, -cap * 0.45), &rim, steel::lerp(steel::SURFACE_4, Color32::WHITE, 0.10), steel::SURFACE_1);
+    let cap = r0 - 10.0;
+    p.circle_filled(c + vec2(0.0, 3.0), cap + 2.5, Color32::from_black_alpha(150));
+    let rim: Vec<Pos2> = (0..72).map(|k| polar(c, cap, k as f32 / 72.0 * TAU)).collect();
+    steel::radial_fan(&p, c + vec2(0.0, -cap * 0.50), &rim, steel::lerp(steel::SURFACE_4, Color32::WHITE, 0.12), steel::SURFACE_1);
     p.circle_stroke(c, cap, Stroke::new(1.0, Color32::from_black_alpha(220)));
-    for k in 0..72 {
-        let a = k as f32 / 72.0 * TAU;
-        let shade = if a.sin() < 0.0 { Color32::from_white_alpha(26) } else { Color32::from_black_alpha(70) };
-        p.line_segment([polar(c, cap - 6.0, a), polar(c, cap - 1.5, a)], Stroke::new(1.0, shade));
+    for k in 0..96 {
+        let a = k as f32 / 96.0 * TAU;
+        let shade = if a.sin() < 0.0 { Color32::from_white_alpha(28) } else { Color32::from_black_alpha(70) };
+        p.line_segment([polar(c, cap - 7.0, a), polar(c, cap - 1.5, a)], Stroke::new(1.0, shade));
     }
-    p.circle_stroke(c, cap - 7.5, Stroke::new(1.0, Color32::from_black_alpha(120)));
-    p.circle_stroke(c, cap - 8.5, Stroke::new(1.0, Color32::from_white_alpha(steel::LIP_SOFT)));
+    p.circle_stroke(c, cap - 8.5, Stroke::new(1.0, Color32::from_black_alpha(130)));
+    p.circle_stroke(c, cap - 9.5, Stroke::new(1.0, Color32::from_white_alpha(steel::LIP_SOFT)));
     if let Some(v) = shown {
         let a = angle_of(v / 100.0);
-        p.line_segment([polar(c, cap - 6.5, a), polar(c, cap - 0.5, a)], Stroke::new(2.5, steel::TEXT));
+        p.line_segment([polar(c, cap - 8.0, a), polar(c, cap - 0.5, a)], Stroke::new(2.5, steel::TEXT));
     }
     if resp.has_focus() {
         p.circle_stroke(c, outer + 1.5, Stroke::new(1.0, steel::EMBER));
@@ -235,24 +292,22 @@ pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_wo
     match level.filter(|_| live) {
         Some(v) => {
             let (figure, word) = crate::device::noise_level_text(v);
-            let color = if v < 50 { TINT } else if v > 50 { TINT_2 } else { steel::TEXT };
-            if word == "neutral" {
-                p.text(c + vec2(0.0, -3.0), Align2::CENTER_CENTER, "0", mono_bold(30.0), steel::lerp(color, Color32::WHITE, 0.45));
-            } else {
-                let g = p.layout_no_wrap(figure, mono_bold(30.0), steel::lerp(color, Color32::WHITE, 0.45));
-                let x = c.x - (g.size().x + 11.0) / 2.0;
-                let w = g.size().x;
-                p.galley(pos2(x, c.y - 3.0 - g.size().y / 2.0), g, Color32::WHITE);
-                p.text(pos2(x + w + 2.0, c.y + 5.0), Align2::LEFT_CENTER, "%", mono_bold(11.0), steel::TEXT_3);
+            let color = steel::lerp(side(f32::from(v) / 100.0), Color32::WHITE, 0.45);
+            let size = (cap * 0.46).clamp(26.0, 40.0);
+            let g = p.layout_no_wrap(figure, mono_bold(size), color);
+            let unit_w = if word == "neutral" { 0.0 } else { size * 0.36 };
+            let x = c.x - (g.size().x + unit_w) / 2.0;
+            let (w, h) = (g.size().x, g.size().y);
+            p.galley(pos2(x, c.y - 5.0 - h / 2.0), g, Color32::WHITE);
+            if unit_w > 0.0 {
+                p.text(pos2(x + w + 2.0, c.y - 5.0 + h * 0.20), Align2::LEFT_CENTER, "%", mono_bold(size * 0.36), steel::TEXT_3);
             }
-            p.text(c + vec2(0.0, 20.0), Align2::CENTER_CENTER, word.to_uppercase(), mono_bold(8.5), steel::TEXT_3);
+            p.text(c + vec2(0.0, size * 0.62 + 4.0), Align2::CENTER_CENTER, word.to_uppercase(), mono_bold(8.5), steel::TEXT_2);
         }
         None => {
-            ui.painter().text(c, Align2::CENTER_CENTER, idle_word, mono_bold(9.5), steel::TEXT_3);
+            ui.painter().text(c, Align2::CENTER_CENTER, idle_word, mono_bold(10.0), steel::TEXT_3);
         }
     }
-    legend(&p, pos2(c.x - outer * 0.60, c.y + outer * 0.86), Align2::CENTER_CENTER, "cancel", 8.5, steel::alpha(TINT, 0.85));
-    legend(&p, pos2(c.x + outer * 0.60, c.y + outer * 0.86), Align2::CENTER_CENTER, "open", 8.5, steel::alpha(TINT_2, 0.85));
 
     let mut value = None;
     if let (true, Some(now)) = (live, level) {
@@ -274,11 +329,25 @@ pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_wo
             if scroll.abs() > 0.5 {
                 next += scroll.signum() * 2.0;
             }
+        }
+        if resp.hovered() || resp.has_focus() {
             ctx.input(|i| {
-                for (key, step) in [(egui::Key::ArrowRight, 1.0), (egui::Key::ArrowUp, 1.0), (egui::Key::ArrowLeft, -1.0), (egui::Key::ArrowDown, -1.0), (egui::Key::PageUp, 10.0), (egui::Key::PageDown, -10.0)] {
+                for (key, step) in [
+                    (egui::Key::ArrowRight, 1.0),
+                    (egui::Key::ArrowUp, 1.0),
+                    (egui::Key::ArrowLeft, -1.0),
+                    (egui::Key::ArrowDown, -1.0),
+                    (egui::Key::PageUp, 10.0),
+                    (egui::Key::PageDown, -10.0),
+                    (egui::Key::Home, -100.0),
+                    (egui::Key::End, 100.0),
+                ] {
                     if i.key_pressed(key) {
                         next += step;
                     }
+                }
+                if i.key_pressed(egui::Key::Delete) {
+                    next = 50.0;
                 }
             });
         }
@@ -290,7 +359,6 @@ pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_wo
             value = Some(next);
         }
     }
-    resp.on_hover_text("Drag, scroll or use the arrow keys. Double-click for neutral");
     DialEvent { value, released: !ui.input(|i| i.pointer.primary_down()) }
 }
 
@@ -350,6 +418,8 @@ pub struct EqView<'a> {
     /// Whether the curve is being heard (sound mode is equalizer).
     pub audible: bool,
     pub enabled: bool,
+    /// 0 to 1 as the curve rises from flat after connecting.
+    pub intro: f32,
 }
 
 pub struct EqEvent {
@@ -387,6 +457,8 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         let x = steel::px(ui.ctx(), x_of(band));
         p.line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.07)));
     }
+    p.text(pos2(plot.left() - 8.0, rect.top() + 9.0), Align2::RIGHT_CENTER, "dB", mono(9.0), steel::TEXT_3);
+    p.text(pos2(rect.right() - 9.0, rect.bottom() - 15.0), Align2::RIGHT_CENTER, "Hz", mono(9.0), steel::TEXT_3);
 
     if !view.enabled {
         // No curve is drawn without a reading: the screen stays dark.
@@ -399,11 +471,12 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         return event;
     }
 
-    let node = |gains: &[i8]| -> Vec<Pos2> { gains.iter().enumerate().map(|(i, g)| pos2(x_of(i), y_of(f32::from(*g)))).collect() };
+    let rise = view.intro.clamp(0.0, 1.0);
+    let node = |gains: &[i8]| -> Vec<Pos2> { gains.iter().enumerate().map(|(i, g)| pos2(x_of(i), y_of(f32::from(*g) * rise))).collect() };
     let trace = |gains: &[i8]| -> Vec<Pos2> {
-        let mut pts = vec![pos2(plot.left(), y_of(f32::from(gains[0])))];
+        let mut pts = vec![pos2(plot.left(), y_of(f32::from(gains[0]) * rise))];
         pts.extend(node(gains));
-        pts.push(pos2(plot.right(), y_of(f32::from(gains[n - 1]))));
+        pts.push(pos2(plot.right(), y_of(f32::from(gains[n - 1]) * rise)));
         smooth(&pts)
     };
 
@@ -440,8 +513,14 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         let col = Rect::from_min_max(pos2(plot.left() + plot.width() * band as f32 / n as f32, rect.top() + 4.0), pos2(plot.left() + plot.width() * (band + 1) as f32 / n as f32, rect.bottom() - 4.0));
         let resp = ui.interact(col, ui.id().with(("eq-band", band)), if view.enabled { Sense::click_and_drag() } else { Sense::hover() });
         let hot = resp.hovered() || resp.dragged();
+        let name = view.labels.get(band).cloned().unwrap_or_default();
+        resp.widget_info(|| egui::WidgetInfo::slider(view.enabled, f64::from(view.shown[band]) / 10.0, format!("Equalizer band {name} Hz, dB")));
+        keep_arrows(ui, &resp, false, true);
         if view.enabled {
             if resp.drag_started() || resp.clicked() {
+                resp.request_focus();
+            }
+            if resp.drag_started() || resp.clicked() || resp.gained_focus() {
                 *selected = Some(band);
             }
             if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged()) {
@@ -457,13 +536,16 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
                     curve[band] = snap(f32::from(curve[band]) + scroll.signum() * step);
                 }
             }
-            if *selected == Some(band) && resp.hovered() {
+            if resp.has_focus() || (*selected == Some(band) && resp.hovered()) {
                 ctx.input(|i| {
                     if i.key_pressed(egui::Key::ArrowUp) {
                         curve[band] = snap(f32::from(curve[band]) + step);
                     }
                     if i.key_pressed(egui::Key::ArrowDown) {
                         curve[band] = snap(f32::from(curve[band]) - step);
+                    }
+                    if i.key_pressed(egui::Key::Delete) {
+                        curve[band] = 0;
                     }
                 });
             }
@@ -477,6 +559,9 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         }
         p.circle_filled(at, 5.0 + 1.5 * grow, if chosen { steel::lerp(color, Color32::WHITE, 0.75) } else { color });
         p.circle_stroke(at, 5.0 + 1.5 * grow, Stroke::new(1.0, Color32::from_black_alpha(160)));
+        if resp.has_focus() {
+            p.circle_stroke(at, 10.0, Stroke::new(1.0, steel::EMBER));
+        }
         // The figure sits where the curve is not: over a peak, under a dip, and on the
         // outside of a slope.
         let here = view.shown[band];
@@ -561,7 +646,7 @@ pub fn fact(p: &Painter, rect: Rect, name: &str, value: Option<&str>) {
     p.text(rect.left_center(), Align2::LEFT_CENTER, name, mono(11.0), steel::TEXT_3);
     match value {
         Some(v) => p.text(rect.right_center(), Align2::RIGHT_CENTER, v, mono_bold(11.0), steel::TEXT),
-        None => p.text(rect.right_center(), Align2::RIGHT_CENTER, "not reported", mono(11.0), steel::alpha(steel::TEXT_3, 0.7)),
+        None => p.text(rect.right_center(), Align2::RIGHT_CENTER, "not reported", mono(11.0), steel::TEXT_3),
     };
 }
 

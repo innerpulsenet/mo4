@@ -47,6 +47,12 @@ struct App {
     naming: Option<String>,
     notice: Option<(String, Tone, Instant)>,
     show_log: bool,
+    /// When the headphones last came online: the instruments come alive from here.
+    online_since: Option<Instant>,
+    /// How to work the instrument under the pointer, shown in the foot of the window.
+    hint: Option<&'static str>,
+    /// When DELETE was first pressed: a second press within a few seconds removes the preset.
+    delete_asked: Option<Instant>,
     shot: Option<Shot>,
 }
 
@@ -61,8 +67,8 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
     let viewport = egui::ViewportBuilder::default()
         .with_title("MO4")
         .with_app_id("mo4")
-        .with_inner_size([1180.0, 760.0])
-        .with_min_inner_size([1080.0, 740.0])
+        .with_inner_size([1240.0, 760.0])
+        .with_min_inner_size([1140.0, 740.0])
         .with_icon(egui::IconData { rgba: include_bytes!("../../assets/icon-256.rgba").to_vec(), width: 256, height: 256 })
         .with_decorations(false);
     let options = eframe::NativeOptions { viewport, ..Default::default() };
@@ -88,6 +94,9 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
                 naming: None,
                 notice: None,
                 show_log: false,
+                online_since: None,
+                hint: None,
+                delete_asked: None,
                 shot: shot.map(|(path, delay)| Shot { path, frames: 0, requested: false, started: Instant::now(), delay }),
             }))
         }),
@@ -139,6 +148,11 @@ impl eframe::App for App {
         let full = ctx.viewport_rect();
         steel::paint_plate(ui.painter(), full, steel::PLATE);
         let online = self.snap.link == LinkState::Online;
+        match (online, self.online_since) {
+            (true, None) => self.online_since = Some(Instant::now()),
+            (false, Some(_)) => self.online_since = None,
+            _ => {}
+        }
 
         let bar = Rect::from_min_max(full.min, pos2(full.right(), full.top() + 46.0));
         self.titlebar(ui, bar);
@@ -149,12 +163,13 @@ impl eframe::App for App {
 
         let body = Rect::from_min_max(pos2(full.left() + 12.0, bar.bottom() + 14.0), pos2(full.right() - 12.0, foot.top() - 12.0));
         let gap = 10.0;
-        let left = Rect::from_min_max(body.min, pos2(body.left() + 268.0, body.bottom()));
+        let left = Rect::from_min_max(body.min, pos2(body.left() + 304.0, body.bottom()));
         let right = Rect::from_min_max(pos2(body.right() - 284.0, body.top()), body.max);
         let center = Rect::from_min_max(pos2(left.right() + gap, body.top()), pos2(right.left() - gap, body.bottom()));
         let device_r = Rect::from_min_max(right.min, pos2(right.right(), right.top() + 296.0));
         let settings_r = Rect::from_min_max(pos2(right.left(), device_r.bottom() + gap), right.max);
 
+        self.hint = None;
         self.noise_panel(ui, left, online);
         self.eq_panel(ui, center, online);
         self.device_panel(ui, device_r);
@@ -190,21 +205,45 @@ impl App {
         }
     }
 
+    /// 0 to 1 over the moment after connecting, eased: the dial's light sweeps out to
+    /// its value and the equalizer curve rises from flat. Always 1 under reduced motion.
+    fn intro(&self, ctx: &egui::Context) -> f32 {
+        const TIME: f32 = 0.7;
+        if ctx.global_style().animation_time == 0.0 {
+            return 1.0;
+        }
+        let t = self.online_since.map_or(1.0, |at| (at.elapsed().as_secs_f32() / TIME).min(1.0));
+        if t < 1.0 {
+            ctx.request_repaint();
+        }
+        1.0 - (1.0 - t).powi(3)
+    }
+
     fn note(&mut self, text: impl Into<String>, tone: Tone) {
         self.notice = Some((text.into(), tone, Instant::now()));
     }
 
     fn titlebar(&mut self, ui: &mut Ui, bar: Rect) {
-        steel::title_drag(ui, bar);
         let p = ui.painter().clone();
         let ctx = ui.ctx().clone();
+        // Dragging the bar moves the window and a double-click maximizes it. It takes the
+        // pointer only: it is not a stop for the Tab key.
+        let grip = ui.interact(bar, ui.id().with("titlebar"), Sense::CLICK | Sense::DRAG);
+        if grip.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if grip.double_clicked() {
+            let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+        }
         widgets::mark(&p, Rect::from_center_size(pos2(bar.left() + 26.0, bar.center().y), vec2(24.0, 22.0)), steel::EMBER);
         let word = steel::steel_text(&p, pos2(bar.left() + 46.0, bar.center().y + 0.5), Align2::LEFT_CENTER, "MO4", widgets::display(21.0));
         widgets::legend(&p, pos2(word.right() + 14.0, bar.center().y + 1.0), Align2::LEFT_CENTER, "headphone control", 9.5, steel::TEXT_3);
 
-        let mut x = bar.right() - 8.0;
-        for which in [2u8, 1, 0] {
-            let r = Rect::from_min_max(pos2(x - 34.0, bar.top() + 9.0), pos2(x, bar.bottom() - 9.0));
+        // Minimize, maximize, close, left to right, and visited by Tab in that order.
+        let mut x = bar.right() - 8.0 - 3.0 * 36.0;
+        for which in [0u8, 1, 2] {
+            let r = Rect::from_min_max(pos2(x + 2.0, bar.top() + 9.0), pos2(x + 36.0, bar.bottom() - 9.0));
             if widgets::window_key(ui, r, which).clicked() {
                 match which {
                     0 => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
@@ -215,9 +254,9 @@ impl App {
                     _ => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                 }
             }
-            x -= 36.0;
+            x += 36.0;
         }
-        x -= 8.0;
+        let x = bar.right() - 8.0 - 3.0 * 36.0 - 8.0;
         let d = &self.snap.dev;
         let (text, lamp) = match &self.snap.link {
             LinkState::Online => {
@@ -248,7 +287,7 @@ impl App {
         }
         y += 28.0 + 10.0;
 
-        let dial = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 206.0));
+        let dial = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 248.0));
         let level = held!(self, NoiseLevel).or(d.noise_level);
         let turnable = online && mode == Some(NoiseMode::Custom);
         let idle = match (online, mode) {
@@ -257,16 +296,24 @@ impl App {
             (_, Some(NoiseMode::Off)) => "OFF",
             _ => "NO READING",
         };
-        let ev = widgets::noise_dial(ui, dial, level.filter(|_| turnable), turnable, idle);
+        let intro = self.intro(ui.ctx());
+        let ev = widgets::noise_dial(ui, dial, level.filter(|_| turnable), turnable, idle, intro);
         if let Some(v) = ev.value {
             self.drag(Setting::NoiseLevel(v), ev.released);
         }
-        y += 206.0 + 6.0;
+        if turnable && ui.rect_contains_pointer(dial) {
+            self.hint = Some("Drag the dial, scroll, or use the arrow keys. Double-click for neutral.");
+        }
+        // The two ends of the dial, named under them.
+        let ends = widgets::painter(ui, turnable);
+        widgets::legend(&ends, pos2(inner.left() + 2.0, dial.bottom() - 7.0), Align2::LEFT_CENTER, "noise cancelling", 8.5, steel::lerp(steel::TEXT_3, TINT, 0.7));
+        widgets::legend(&ends, pos2(inner.right() - 2.0, dial.bottom() - 7.0), Align2::RIGHT_CENTER, "transparency", 8.5, steel::lerp(steel::TEXT_3, widgets::TINT_2, 0.7));
+        y += 248.0 + 10.0;
 
         let words = match (online, mode) {
             (false, _) => "",
             (_, Some(NoiseMode::Adaptive)) => "The headphones set the level from the noise around you.",
-            (_, Some(NoiseMode::Custom)) => "Turn the dial: left cancels noise, right lets the outside in.",
+            (_, Some(NoiseMode::Custom)) => "Turn the dial left to cancel more noise, right to let more of the outside in.",
             (_, Some(NoiseMode::Off)) => "Noise control is off. Pick Adaptive or Custom to use the dial.",
             _ => "The headphones did not report their noise control mode.",
         };
@@ -278,10 +325,13 @@ impl App {
         y += 18.0;
         let row = Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 26.0));
         let wind = held!(self, AntiWind).or(d.anti_wind);
-        let labels: Vec<String> = ANTI_WIND.iter().map(|s| s.to_uppercase()).collect();
+        // Shown in order of strength; the headphones number them off, max, auto.
+        const ORDER: [u8; 3] = [0, 2, 1];
+        let labels: Vec<String> = ORDER.iter().map(|i| ANTI_WIND[usize::from(*i)].to_uppercase()).collect();
         let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-        if let Some(i) = widgets::selector(ui, row, "anti-wind", &labels, wind.map(usize::from), TINT, online && d.anti_wind.is_some()) {
-            self.send(Setting::AntiWind(i as u8));
+        let current = wind.and_then(|w| ORDER.iter().position(|o| *o == w));
+        if let Some(i) = widgets::selector(ui, row, "anti-wind", &labels, current, TINT, online && d.anti_wind.is_some()) {
+            self.send(Setting::AntiWind(ORDER[i]));
         }
         y += 26.0 + 12.0;
 
@@ -305,7 +355,7 @@ impl App {
             widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), &title);
             y += 20.0;
             if d.paired.is_empty() {
-                p.text(pos2(inner.left(), y + 8.0), Align2::LEFT_CENTER, if online { "not reported" } else { "no reading" }, mono(11.0), steel::alpha(steel::TEXT_3, 0.7));
+                p.text(pos2(inner.left(), y + 8.0), Align2::LEFT_CENTER, if online { "not reported" } else { "no reading" }, mono(11.0), steel::TEXT_3);
             }
             let rows = ((inner.bottom() - y) / 20.0).floor() as usize;
             for (i, dev) in d.paired.iter().enumerate().take(rows) {
@@ -316,9 +366,11 @@ impl App {
                 }
                 steel::lamp(&p, pos2(inner.left() + 5.0, cy), 3.2, steel::MINT, if dev.connected { 1.0 } else { 0.0 }, LampShape::Round);
                 let name = if dev.name.is_empty() { "unnamed device" } else { dev.name.as_str() };
-                let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 62.0, cy + 10.0)));
+                let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 84.0, cy + 10.0)));
                 clip.text(pos2(inner.left() + 16.0, cy), Align2::LEFT_CENTER, name, sans(12.0), if dev.connected { steel::TEXT } else { steel::TEXT_3 });
-                p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, if dev.connected { "LINKED" } else { "AWAY" }, mono_bold(8.5), steel::TEXT_3);
+                if dev.connected {
+                    p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTED", mono_bold(9.5), steel::TEXT_3);
+                }
             }
         }
     }
@@ -327,7 +379,7 @@ impl App {
         let p = ui.painter().clone();
         let d = self.snap.dev.clone();
         let bands = d.eq.map_or(5, |c| usize::from(c.bands));
-        let inner = widgets::section(&p, r, &format!("equalizer, {bands}-band, kept on the headphones"));
+        let inner = widgets::section(&p, r, "equalizer");
         let usable = online && d.eq_supported() && d.eq_gains.is_some();
         let (min, max) = d.eq.map_or((-60, 60), |c| (c.min, c.max));
         let device_curve = d.eq_gains.clone();
@@ -355,9 +407,8 @@ impl App {
         if let Some(i) = widgets::selector(ui, sel, "sound-mode", &["OFF", "EQUALIZER", "PODCAST"], current, TINT, online && d.sound_mode.is_some()) {
             self.send(Setting::SoundMode(i as u16));
         }
-        if sound_mode == Some(3) {
-            p.text(pos2(sel.left() - 10.0, top.center().y), Align2::RIGHT_CENTER, "PERSONALIZED (SET IN THE PHONE APP)", mono_bold(9.0), steel::TEXT_3);
-        }
+        let mode_name = if sound_mode == Some(3) { "sound mode: personalized in the phone app" } else { "sound mode" };
+        widgets::legend(&p, pos2(sel.left() - 10.0, top.center().y), Align2::RIGHT_CENTER, mode_name, 9.5, steel::TEXT_3);
 
         let keys_y = inner.bottom() - 26.0;
         let list = Rect::from_min_max(pos2(inner.left(), top.bottom() + 12.0), pos2(inner.left() + 178.0, keys_y - 12.0));
@@ -385,9 +436,20 @@ impl App {
                 text_clip.text(row.min + vec2(11.0, 6.0), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
                 text_clip.text(row.min + vec2(11.0, 21.0), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
                 widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 10.0), pos2(row.right() - 9.0, row.bottom() - 10.0)), &preset.gains, if active { TINT } else { steel::TEXT_3 });
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, usable, active, format!("Preset {}", preset.name)));
+                if resp.has_focus() {
+                    rp.rect_stroke(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), Stroke::new(1.0, steel::EMBER), StrokeKind::Inside);
+                }
                 if resp.clicked() {
                     apply = Some(preset.gains.clone());
                 }
+            }
+            if !self.presets.iter().any(|x| !x.builtin) {
+                // Nothing of the user's own yet: say how to get one here.
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
+                steel::groove_h(ui.painter(), r.left() + 11.0, r.right() - 9.0, r.top() + 8.0);
+                let g = ui.painter().layout("Shape a curve and press SAVE AS to keep it here.".to_owned(), sans(11.5), steel::TEXT_3, r.width() - 22.0);
+                ui.painter().galley(r.min + vec2(11.0, 20.0), g, steel::TEXT_3);
             }
         });
         if let Some(gains) = apply {
@@ -395,13 +457,14 @@ impl App {
         }
 
         let labels: Vec<String> = (0..bands).map(|i| d.eq_freqs.get(i).copied().flatten().map_or_else(|| format!("band {}", i + 1), hz_label)).collect();
-        let view = widgets::EqView { shown: &shown, device: device_curve.as_deref(), labels: &labels, min, max, audible, enabled: usable };
+        let intro = self.intro(ui.ctx());
+        let view = widgets::EqView { shown: &shown, device: device_curve.as_deref(), labels: &labels, min, max, audible, enabled: usable, intro };
         let ev = widgets::eq_editor(ui, graph, &view, &mut self.band);
         if let Some(curve) = ev.curve {
             self.drag(Setting::EqGains(curve), ev.released);
         }
-        if online && usable {
-            p.text(pos2(graph.right() - 10.0, graph.top() + 11.0), Align2::RIGHT_CENTER, "BANDS AS THE HEADPHONES REPORT THEM, HZ", mono_bold(8.5), steel::alpha(steel::TEXT_3, 0.8));
+        if usable && ui.rect_contains_pointer(graph) {
+            self.hint = Some("Drag a node, scroll over a band, or use the arrow keys. Hold Shift for tenths of a dB. Double-click a node to zero it.");
         }
 
         // Keys under the screen.
@@ -437,8 +500,18 @@ impl App {
             if widgets::key(ui, key_at(right - 152.0, 78.0), "save-as", "SAVE AS", false, TINT, usable, false).on_hover_text("Keep this curve as a preset of your own").clicked() {
                 self.naming = Some(String::new());
             }
-            if widgets::key(ui, key_at(right - 68.0, 68.0), "delete", "DELETE", false, TINT, usable && own.is_some(), false).on_hover_text("Remove the selected preset of your own").clicked() {
-                if let Some(i) = own {
+            let asked = self.delete_asked.is_some_and(|at| at.elapsed() < Duration::from_secs(4)) && own.is_some();
+            if !asked {
+                self.delete_asked = None;
+            }
+            let label = if asked { "REALLY?" } else { "DELETE" };
+            let tip = if asked { "Press again to remove this preset for good" } else { "Remove the selected preset of your own" };
+            if widgets::key(ui, key_at(right - 68.0, 68.0), "delete", label, asked, steel::ERR, usable && own.is_some(), false).on_hover_text(tip).clicked() {
+                if !asked {
+                    self.delete_asked = Some(Instant::now());
+                    ui.ctx().request_repaint_after(Duration::from_secs(4));
+                } else if let Some(i) = own {
+                    self.delete_asked = None;
                     let gone = self.presets.remove(i);
                     match store::save_presets(&self.presets) {
                         Ok(()) => self.note(format!("Preset \"{}\" removed", gone.name), Tone::Info),
@@ -491,7 +564,7 @@ impl App {
         }
         let key = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 26.0), inner.max);
         let online = self.snap.link == LinkState::Online;
-        if widgets::key(ui, key, "refresh", "READ AGAIN", false, TINT, online, false).on_hover_text("Read every setting from the headphones again").clicked() {
+        if widgets::key(ui, key, "refresh", "REFRESH", false, TINT, online, false).on_hover_text("Read every setting from the headphones again").clicked() {
             self.session.send(Msg::Refresh);
         }
     }
@@ -567,6 +640,16 @@ impl App {
         if resp.clicked() {
             self.show_log = !self.show_log;
         }
+        // What just happened outranks how to use the thing under the pointer.
+        let fresh = self.snap.log.back().is_some_and(|l| l.when.elapsed() < Duration::from_secs(5));
+        if fresh {
+            ui.ctx().request_repaint_after(Duration::from_secs(1));
+        }
+        if let (Some(hint), None, false) = (self.hint, &self.notice, fresh) {
+            p.with_clip_rect(area).text(pos2(foot.left() + 16.0, cy), Align2::LEFT_CENTER, hint, sans(12.0), steel::TEXT_2);
+            self.foot_mark(&p, foot);
+            return;
+        }
         let line = match (&self.notice, self.snap.log.back()) {
             (Some((text, tone, _)), _) => Some((store::clock(), text.clone(), *tone)),
             (None, Some(l)) => Some((l.at.clone(), l.text.clone(), l.tone)),
@@ -586,8 +669,13 @@ impl App {
             let clip = p.with_clip_rect(area);
             clip.text(pos2(t.right() + 12.0, cy), Align2::LEFT_CENTER, text, mono(11.0), color);
         }
+        self.foot_mark(&p, foot);
+    }
+
+    fn foot_mark(&self, p: &egui::Painter, foot: Rect) {
+        let cy = foot.center().y;
         let t = p.text(pos2(foot.right() - 16.0, cy), Align2::RIGHT_CENTER, "innerpulse", mono(11.0), steel::TEXT_3);
-        widgets::mark(&p, Rect::from_center_size(pos2(t.left() - 13.0, cy), vec2(13.0, 12.0)), steel::EMBER);
+        widgets::mark(p, Rect::from_center_size(pos2(t.left() - 13.0, cy), vec2(13.0, 12.0)), steel::EMBER);
     }
 
     /// The history: a sheet of glass over the foot of the window.

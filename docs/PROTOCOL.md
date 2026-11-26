@@ -224,5 +224,6 @@ and leaves those command words alone on such firmware.
   an empty `1B00`, pushed `1A81` with the new table, and the read-back agreed; the
   mode and level were untouched. Every other setter is tested against the simulated
   headset only.
-- The Windows transport compiles and type-checks, and has **not** been run.
+- The Windows program builds and passes its tests on GitHub, and its transport has
+  **not** been run against headphones.
 - The USB pipe is not usable (see Transport).

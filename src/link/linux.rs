@@ -319,7 +319,7 @@ pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
             None => match sdp_channels(&addr) {
                 Ok(c) => c,
                 Err(e) => {
-                    trouble = Some(format!("{}: service lookup failed ({e})", format_addr(&addr)));
+                    trouble = Some(format!("The device at {} {}", format_addr(&addr), super::explain(&e)));
                     continue;
                 }
             },

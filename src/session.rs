@@ -36,6 +36,7 @@ pub struct LogLine {
     pub at: String,
     pub text: String,
     pub tone: Tone,
+    pub when: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -117,7 +118,7 @@ impl Worker {
     }
 
     fn log(&self, tone: Tone, text: impl Into<String>) {
-        let line = LogLine { at: crate::store::clock(), text: text.into(), tone };
+        let line = LogLine { at: crate::store::clock(), text: text.into(), tone, when: Instant::now() };
         self.update(|s| {
             s.log.push_back(line);
             while s.log.len() > LOG_LINES {

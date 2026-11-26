@@ -1,39 +1,81 @@
 name: build
 
-# Tests on Linux, then builds the Linux and Windows programs and keeps them as artifacts.
+# Every push to main tests and packages the app for Linux (.deb and .tar.gz) and
+# Windows (.zip), kept as artifacts of the run. Pushing a tag like v0.2.0 also
+# publishes them as a GitHub release.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release
       - run: cargo build --release
       - name: Package
         run: |
-          mkdir -p pkg/mo4/linux
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          mkdir -p dist pkg/mo4/linux
+          linux/package-deb.sh dist
           cp target/release/mo4 assets/mo4.png README.md pkg/mo4/
           cp -r linux/install.sh linux/70-mo4.rules linux/mo4.desktop linux/icons pkg/mo4/linux/
-          tar -C pkg -czf mo4-linux-x64.tar.gz mo4
+          tar -C pkg -czf "dist/mo4-$version-linux-x64.tar.gz" mo4
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
-          name: mo4-linux-x64
-          path: mo4-linux-x64.tar.gz
+          name: mo4-linux
+          path: dist/*
+          if-no-files-found: error
 
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release
       - run: cargo build --release
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force dist, pkg/mo4 | Out-Null
+          Copy-Item target/release/mo4.exe, README.md pkg/mo4/
+          Compress-Archive -Path pkg/mo4 -DestinationPath "dist/mo4-$version-windows-x64.zip"
+          Get-ChildItem dist
       - uses: actions/upload-artifact@v4
         with:
-          name: mo4-windows-x64
-          path: target/release/mo4.exe
+          name: mo4-windows
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the version in Cargo.toml
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match version $version in Cargo.toml" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "MO4 ${GITHUB_REF_NAME#v}" --generate-notes

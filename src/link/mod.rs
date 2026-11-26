@@ -50,6 +50,22 @@ pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
     return Err("This platform has no Bluetooth support in MO4 yet".into());
 }
 
+/// Why a connection attempt failed, in words that finish "The device at X ...".
+pub fn explain(e: &io::Error) -> String {
+    const UNREACHABLE: &str = "is not reachable: it may be off, out of range or not connected";
+    // Linux reports a device that does not answer its page as "host is down".
+    if cfg!(target_os = "linux") && e.raw_os_error() == Some(112) {
+        return UNREACHABLE.into();
+    }
+    match e.kind() {
+        io::ErrorKind::TimedOut => "did not answer in time".into(),
+        io::ErrorKind::ConnectionRefused => "refused the connection".into(),
+        io::ErrorKind::HostUnreachable | io::ErrorKind::NotConnected => UNREACHABLE.into(),
+        io::ErrorKind::PermissionDenied => "could not be opened: the system did not allow it".into(),
+        _ => format!("could not be opened ({e})"),
+    }
+}
+
 pub fn parse_addr(s: &str) -> Option<[u8; 6]> {
     let parts: Vec<&str> = s.split([':', '-']).collect();
     if parts.len() != 6 {
@@ -72,6 +88,13 @@ pub fn format_addr(a: &[u8; 6]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explains_failures_in_words() {
+        assert_eq!(explain(&io::Error::from(io::ErrorKind::TimedOut)), "did not answer in time");
+        assert!(explain(&io::Error::from(io::ErrorKind::HostUnreachable)).starts_with("is not reachable"));
+        assert!(explain(&io::Error::other("odd")).contains("odd"));
+    }
 
     #[test]
     fn parses_addresses() {

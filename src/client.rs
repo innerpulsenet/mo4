@@ -62,7 +62,7 @@ impl Client {
             let link = match (ep.open)() {
                 Ok(l) => l,
                 Err(e) => {
-                    last = format!("{}: {e}", ep.label);
+                    last = format!("{} {}", ep.label, link::explain(&e));
                     continue;
                 }
             };
