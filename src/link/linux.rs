@@ -298,11 +298,7 @@ fn has_adapter() -> bool {
 
 pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
     if !has_adapter() {
-        return Err(if usb_headphones().is_some() {
-            "The headphones are plugged in over USB, but this computer has no Bluetooth adapter, and their settings are only reachable over Bluetooth".into()
-        } else {
-            "This computer has no Bluetooth adapter".into()
-        });
+        return Err("This computer has no Bluetooth adapter".into());
     }
     let addrs = match target.addr {
         Some(a) => vec![a],
@@ -339,11 +335,11 @@ pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
 
 // --- USB -------------------------------------------------------------------------
 
-use super::usb::{PRODUCT, Pipe, VENDOR};
+use super::usb::{Cable, PRODUCT, Pipe, VENDOR};
 
 /// The hidraw node of the headphones' vendor HID interface (interface 0), when they
-/// are plugged in over USB.
-fn usb_headphones() -> Option<PathBuf> {
+/// are plugged in over USB, and the directory sysfs keeps for the USB device itself.
+fn usb_node() -> Option<(PathBuf, PathBuf)> {
     for entry in fs::read_dir("/sys/class/hidraw").ok()?.flatten() {
         let dev = entry.path().join("device");
         let uevent = fs::read_to_string(dev.join("uevent")).unwrap_or_default();
@@ -353,10 +349,24 @@ fn usb_headphones() -> Option<PathBuf> {
         }
         let iface = fs::canonicalize(&dev).ok()?.parent()?.to_path_buf();
         if fs::read_to_string(iface.join("bInterfaceNumber")).is_ok_and(|n| n.trim() == "00") {
-            return Some(Path::new("/dev").join(entry.file_name()));
+            return Some((Path::new("/dev").join(entry.file_name()), iface.parent()?.to_path_buf()));
         }
     }
     None
+}
+
+fn usb_headphones() -> Option<PathBuf> {
+    usb_node().map(|(node, _)| node)
+}
+
+/// What sysfs says about the headphones on USB. Nothing is opened but those files.
+pub fn usb_cable() -> Option<Cable> {
+    let (_, device) = usb_node()?;
+    let read = |name: &str| fs::read_to_string(device.join(name)).ok().map(|s| s.trim().to_string());
+    // Switched off, the headphones keep the control interface and drop the other four.
+    let on = read("bNumInterfaces").and_then(|n| n.parse::<u32>().ok()).is_none_or(|n| n > 1);
+    let version = read("bcdDevice").and_then(|v| u16::from_str_radix(&v, 16).ok());
+    Some(Cable { on, version })
 }
 
 struct HidRaw(OwnedFd);

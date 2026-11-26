@@ -14,6 +14,7 @@ use egui::{Align2, Color32, CornerRadius, FontFamily, Rect, Sense, Stroke, Strok
 use crate::cli::hz_label;
 use crate::device::{self, ANTI_WIND, AUTO_OFF, NoiseMode, SIDETONE_MAX, Setting};
 use crate::link::Target;
+use crate::link::usb::Cable;
 use crate::session::{LinkState, Msg, Session, Snapshot, Tone};
 use crate::store::{self, Preset};
 use steel::LampShape;
@@ -266,6 +267,9 @@ impl App {
             }
             LinkState::Searching(_) => ("SEARCHING".to_string(), (steel::AMBER, LampShape::Round, pulse(&ctx))),
             LinkState::Offline(_) => ("NOT CONNECTED".to_string(), (steel::ERR, LampShape::Square, 1.0)),
+            // Square like "not connected", because there is no control either way; amber
+            // because the headphones are there.
+            LinkState::Usb(cable, _) => (if cable.on { "ON USB" } else { "ON USB, SWITCHED OFF" }.to_string(), (steel::AMBER, LampShape::Square, 1.0)),
         };
         let chip = widgets::chip(&p, pos2(x, bar.center().y), &text, Some(lamp));
         if self.snap.sim {
@@ -554,7 +558,11 @@ impl App {
         let codec = d.codec.map(|c| device::codec_name(c).map_or_else(|| format!("unknown ({c})"), str::to_string));
         let wear = d.wear.map(|w| device::wear_name(w).map_or_else(|| format!("unknown ({w})"), str::to_string));
         let firmware = d.firmware_text();
-        let via = (!self.snap.via.is_empty() && self.snap.link == LinkState::Online).then(|| self.snap.via.clone());
+        let via = match &self.snap.link {
+            LinkState::Online if !self.snap.via.is_empty() => Some(self.snap.via.clone()),
+            LinkState::Usb(cable, _) => Some(usb_words(cable).to_string()),
+            _ => None,
+        };
         let facts: [(&str, Option<&str>); 6] = [
             ("Model", d.model.as_deref()),
             ("Firmware", firmware.as_deref()),
@@ -667,6 +675,7 @@ impl App {
         let line = line.or_else(|| match &self.snap.link {
             LinkState::Searching(what) => Some((store::clock(), what.clone(), Tone::Info)),
             LinkState::Offline(why) => Some((store::clock(), why.clone(), Tone::Bad)),
+            LinkState::Usb(cable, why) => Some((store::clock(), format!("{}. No control over the cable. {why}", usb_words(cable)), Tone::Info)),
             LinkState::Online => None,
         });
         if let Some((at, text, tone)) = line {
@@ -713,20 +722,31 @@ impl App {
 
     /// Shown over the controls while there are no headphones to talk to.
     fn offline_card(&mut self, ui: &mut Ui, body: Rect) {
-        let (title, why, searching) = match &self.snap.link {
-            LinkState::Searching(what) => ("looking for the headphones", what.clone(), true),
-            LinkState::Offline(why) => ("not connected", why.clone(), false),
+        const BLUETOOTH: &str = "MO4 talks to the headphones over Bluetooth. Pair and connect them in the system's Bluetooth settings; this window finds them on its own.";
+        let (title, why, hint, lamp) = match &self.snap.link {
+            LinkState::Searching(what) => ("looking for the headphones", what.clone(), BLUETOOTH.to_owned(), (steel::AMBER, LampShape::Round, pulse(ui.ctx()))),
+            LinkState::Offline(why) => ("not connected", why.clone(), BLUETOOTH.to_owned(), (steel::ERR, LampShape::Square, 1.0)),
+            LinkState::Usb(cable, why) => {
+                let seen = if cable.on {
+                    "The headphones are plugged in and switched on. Over the cable they are a sound card and nothing more: the battery, noise control, the equalizer and the settings cannot be read or changed that way."
+                } else {
+                    "The headphones are plugged in and switched off, so they are only charging. Nothing can be read or changed until they are switched on and connected over Bluetooth."
+                };
+                let version = cable.version_text().map_or(String::new(), |v| format!(" USB device version {v}."));
+                (
+                    "on usb, no control",
+                    seen.to_owned(),
+                    format!("For control, pair and connect the headphones in the system's Bluetooth settings; this window finds them on its own. Bluetooth says: {why}.{version}"),
+                    (steel::AMBER, LampShape::Square, 1.0),
+                )
+            }
             LinkState::Online => return,
         };
+        let searching = matches!(self.snap.link, LinkState::Searching(_));
         let p = ui.painter().clone();
         let width = 470.0;
         let text = p.layout(why, sans(13.5), steel::TEXT, width - 56.0);
-        let hint = p.layout(
-            "MO4 talks to the headphones over Bluetooth. Pair and connect them in the system's Bluetooth settings; this window finds them on its own.".to_owned(),
-            sans(12.0),
-            steel::TEXT_3,
-            width - 56.0,
-        );
+        let hint = p.layout(hint, sans(12.0), steel::TEXT_3, width - 56.0);
         let h = 62.0 + text.size().y + 14.0 + hint.size().y + 60.0;
         let card = Rect::from_center_size(body.center(), vec2(width, h));
         // The controls behind have nothing to show: darken them so the card reads alone.
@@ -734,7 +754,7 @@ impl App {
         p.rect(card.expand(1.0).translate(vec2(0.0, 8.0)), CornerRadius::same(steel::R_GLASS + 2), Color32::from_black_alpha(70), Stroke::NONE, StrokeKind::Outside);
         p.rect(card, CornerRadius::same(steel::R_GLASS), steel::alpha(steel::SURFACE_1, 0.96), Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
         steel::glass(&p, card);
-        let (color, shape, lit) = if searching { (steel::AMBER, LampShape::Round, pulse(ui.ctx())) } else { (steel::ERR, LampShape::Square, 1.0) };
+        let (color, shape, lit) = lamp;
         steel::lamp(&p, card.min + vec2(33.0, 33.0), 4.5, color, lit, shape);
         widgets::legend(&p, card.min + vec2(48.0, 33.0), Align2::LEFT_CENTER, title, 11.0, steel::TEXT_2);
         let mut y = card.top() + 62.0;
@@ -776,6 +796,11 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         }
     }
+}
+
+/// What the cable shows, in a few words.
+fn usb_words(cable: &Cable) -> &'static str {
+    if cable.on { "On USB, switched on" } else { "On USB, switched off" }
 }
 
 /// A slow breath for a lamp that means "working": 0.35 to 1. Still when the system

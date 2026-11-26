@@ -158,6 +158,12 @@ This may also be what happened in the first session on Linux, where between two
 writes the USB function dropped and came back twice within three seconds, once
 briefly with a different serial string. What caused that is still not known.
 
+The window uses this difference, and sends nothing to do it. With no Bluetooth link it
+asks the system whether `3542:1000` is plugged in and whether it has its other
+interfaces, and says "on USB" or "on USB, switched off" accordingly. The switched-on
+case has been seen on Windows 11. The switched-off case and both cases on Linux have
+not been run.
+
 #### Before sending anything else
 
 - **The headphones act on what they accept.** One frame turned them off. Four more

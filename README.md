@@ -117,7 +117,10 @@ Control goes over **Bluetooth**. Pair and connect the headphones in the system's
 Bluetooth settings as usual; MO4 finds them on its own and never pairs anything itself.
 
 Over a USB cable the headphones are only a sound card as far as MO4 is concerned: the
-cable has a control channel of its own that does not speak this protocol.
+cable has a control channel of its own that does not speak this protocol. The window
+does notice the cable. With no Bluetooth link it says the headphones are on USB, and
+whether they are switched on or off and charging, and that nothing can be read or
+changed that way.
 
 The phone app uses the same channel. Close it if MO4 cannot connect.
 

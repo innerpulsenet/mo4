@@ -9,8 +9,12 @@ use std::time::{Duration, Instant};
 use crate::client::Client;
 use crate::device::{Device, Setting};
 use crate::link::Target;
+use crate::link::usb::{self, Cable};
 
 const RETRY: Duration = Duration::from_secs(5);
+/// How often to look at the cable while there is no control link, so that plugging in,
+/// unplugging and switching the headphones on or off show without waiting for a retry.
+const CABLE_POLL: Duration = Duration::from_secs(1);
 const BATTERY_POLL: Duration = Duration::from_secs(60);
 const LOG_LINES: usize = 60;
 
@@ -21,6 +25,19 @@ pub enum LinkState {
     Online,
     /// Not connected, and why.
     Offline(String),
+    /// Not connected for control, but plugged in over USB: what the cable shows, and why
+    /// there is no control link. Nothing can be read or changed in this state.
+    Usb(Cable, String),
+}
+
+impl LinkState {
+    /// Without a control link: the right one of `Usb` and `Offline` for what is plugged in.
+    fn down(why: String, cable: Option<Cable>) -> LinkState {
+        match cable {
+            Some(cable) => LinkState::Usb(cable, why),
+            None => LinkState::Offline(why),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,38 +144,64 @@ impl Worker {
         });
     }
 
+    /// The headphones on USB, as far as the cable shows. The simulator has no cable.
+    fn cable(&self) -> Option<Cable> {
+        if self.target.sim { None } else { usb::cable() }
+    }
+
     fn run(self) {
+        // While a retry is under way the window keeps showing what the cable showed
+        // before it, so a headset on USB does not blink "searching" every few seconds.
+        let mut quiet = false;
         loop {
-            self.update(|s| s.link = LinkState::Searching("Looking for the headphones".into()));
-            let mut note = |text: String| self.update(|s| s.link = LinkState::Searching(text));
-            match Client::connect(&self.target, self.trace, &mut note) {
+            if !quiet {
+                self.update(|s| s.link = LinkState::Searching("Looking for the headphones".into()));
+            }
+            let mut note = |text: String| {
+                if !quiet {
+                    self.update(|s| s.link = LinkState::Searching(text));
+                }
+            };
+            let why = match Client::connect(&self.target, self.trace, &mut note) {
                 Ok(client) => match self.serve(client) {
                     Outcome::Quit => return,
-                    Outcome::Reconnect => continue,
+                    Outcome::Reconnect => {
+                        quiet = false;
+                        continue;
+                    }
                     Outcome::Lost(why) => {
                         self.log(Tone::Bad, format!("Disconnected: {why}"));
-                        self.update(|s| {
-                            s.link = LinkState::Offline(why);
-                            s.dev = Device::default();
-                            s.busy = false;
-                        });
+                        self.update(|s| s.dev = Device::default());
+                        why
                     }
                 },
-                Err(why) => self.update(|s| {
-                    s.link = LinkState::Offline(why);
-                    s.busy = false;
-                }),
-            }
+                Err(why) => why,
+            };
+            let mut cable = self.cable();
+            self.update(|s| {
+                s.link = LinkState::down(why.clone(), cable);
+                s.busy = false;
+            });
             // Wait before looking again; a reconnect request cuts the wait short.
             let until = Instant::now() + RETRY;
-            loop {
-                match self.rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+            quiet = loop {
+                let left = until.saturating_duration_since(Instant::now());
+                match self.rx.recv_timeout(left.min(CABLE_POLL)) {
                     Ok(Msg::Quit) | Err(RecvTimeoutError::Disconnected) => return,
-                    Ok(Msg::Reconnect) | Err(RecvTimeoutError::Timeout) => break,
+                    // Asked for by hand: show the search.
+                    Ok(Msg::Reconnect) => break false,
+                    Err(RecvTimeoutError::Timeout) if left <= CABLE_POLL => break cable.is_some(),
+                    Err(RecvTimeoutError::Timeout) => {
+                        let now = self.cable();
+                        if now != cable {
+                            cable = now;
+                            self.update(|s| s.link = LinkState::down(why.clone(), cable));
+                        }
+                    }
                     Ok(Msg::Set(_)) => self.update(|s| s.busy = false),
                     Ok(Msg::Refresh) => {}
                 }
-            }
+            };
         }
     }
 

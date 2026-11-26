@@ -71,16 +71,6 @@ fn services(device: &BluetoothDevice, mode: BluetoothCacheMode) -> io::Result<Ve
 }
 
 pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
-    discover_bluetooth(target).map_err(|e| {
-        if usb_headphones().is_some() {
-            format!("{e}. The headphones are plugged in over USB, but their settings are only reachable over Bluetooth")
-        } else {
-            e
-        }
-    })
-}
-
-fn discover_bluetooth(target: &Target) -> Result<Vec<Endpoint>, String> {
     let fail = |e: io::Error| format!("Could not list Bluetooth devices ({e})");
     let selector = BluetoothDevice::GetDeviceSelectorFromPairingState(true).map_err(|e| fail(err(e)))?;
     let found = wait(DeviceInformation::FindAllAsyncAqsFilter(&selector).map_err(|e| fail(err(e)))?, LOOKUP_TIMEOUT).map_err(fail)?;
@@ -204,14 +194,16 @@ impl Drop for Stream {
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
     CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_ListW, CR_SUCCESS,
 };
-use windows::Win32::Devices::HumanInterfaceDevice::HidD_GetHidGuid;
+use windows::Win32::Devices::HumanInterfaceDevice::{HIDD_ATTRIBUTES, HidD_GetAttributes, HidD_GetHidGuid};
 use windows::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0};
-use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadFile, WriteFile};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadFile, WriteFile,
+};
 use windows::Win32::System::IO::{CancelIo, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
 use windows::core::PCWSTR;
 
-use super::usb::{PRODUCT, Pipe, REPORT_LEN, VENDOR};
+use super::usb::{Cable, PRODUCT, Pipe, REPORT_LEN, VENDOR};
 
 /// The device path of the headphones' vendor HID interface (interface 0), when they
 /// are plugged in over USB. Switched off but plugged in, the headphones are that one
@@ -234,6 +226,23 @@ fn usb_headphones() -> Option<String> {
             path.contains(&on) || path.contains(&off)
         })
     }
+}
+
+/// What the system knows about the headphones on USB. The interface is opened with no
+/// access at all, which is enough to ask for the ids Windows read when it was plugged in.
+pub fn usb_cable() -> Option<Cable> {
+    let path = usb_headphones()?;
+    let on = path.to_ascii_lowercase().contains("&mi_00");
+    let wide: Vec<u16> = path.encode_utf16().chain([0]).collect();
+    let version = unsafe {
+        CreateFileW(PCWSTR(wide.as_ptr()), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None).ok().and_then(|file| {
+            let mut ids = HIDD_ATTRIBUTES { Size: size_of::<HIDD_ATTRIBUTES>() as u32, ..Default::default() };
+            let known = HidD_GetAttributes(file, &mut ids);
+            let _ = CloseHandle(file);
+            known.then_some(ids.VersionNumber)
+        })
+    };
+    Some(Cable { on, version })
 }
 
 /// The interface opened for overlapped I/O, so a read can wait with a timeout while

@@ -145,7 +145,10 @@ pub fn parse_setting(key: &str, v: &str) -> Result<Setting, String> {
 }
 
 fn connect(target: &Target, trace: bool) -> Result<Client, String> {
-    let mut client = Client::connect(target, trace, &mut |_| {})?;
+    let mut client = Client::connect(target, trace, &mut |_| {}).map_err(|e| match usb::cable() {
+        Some(_) if !target.sim => format!("{e}. The headphones are plugged in over USB, but their settings are only reachable over Bluetooth"),
+        _ => e,
+    })?;
     client.init().map_err(|e| e.to_string())?;
     if target.sim {
         eprintln!("SIMULATOR: a made-up device. These are not readings from real headphones.");

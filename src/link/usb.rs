@@ -24,6 +24,33 @@ const REPLY_WAIT: Duration = Duration::from_secs(2);
 /// How long to keep listening after an answer, in case a second report follows.
 const SETTLE: Duration = Duration::from_millis(150);
 
+/// What the cable shows about the headphones without anything being sent to them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cable {
+    /// Switched on. Off but plugged in, the headphones are the control pipe alone: the
+    /// sound card and the media keys are gone until they are switched on again.
+    pub on: bool,
+    /// The USB device version, two bytes that read as "29.11". Not the firmware version.
+    pub version: Option<u16>,
+}
+
+impl Cable {
+    pub fn version_text(&self) -> Option<String> {
+        self.version.map(|v| format!("{:x}.{:02x}", v >> 8, v & 0xFF))
+    }
+}
+
+/// The headphones on USB, if they are plugged in. This asks the system what it already
+/// knows about the device and sends the headphones nothing.
+pub fn cable() -> Option<Cable> {
+    #[cfg(target_os = "linux")]
+    return super::linux::usb_cable();
+    #[cfg(windows)]
+    return super::windows::usb_cable();
+    #[cfg(not(any(target_os = "linux", windows)))]
+    return None;
+}
+
 /// The HID interface, opened for reading and writing.
 pub trait Pipe {
     /// Send one output report: the report id, then `REPORT_LEN` bytes.
@@ -178,6 +205,13 @@ mod tests {
         bare[..5].copy_from_slice(&[0xFD, 0x01, 0x00, 0x00, 0x05]);
         assert_eq!(hex(unpadded(&bare)), "FD 01 00 00 05");
         assert_eq!(hex(unpadded(&[0u8; REPORT_LEN])), "00 00 00 00 00");
+    }
+
+    #[test]
+    fn writes_the_usb_version_the_way_the_system_does() {
+        assert_eq!(Cable { on: true, version: Some(0x2911) }.version_text().as_deref(), Some("29.11"));
+        assert_eq!(Cable { on: true, version: Some(0x0105) }.version_text().as_deref(), Some("1.05"));
+        assert_eq!(Cable { on: false, version: None }.version_text(), None);
     }
 
     #[test]
