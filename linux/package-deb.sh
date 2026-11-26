@@ -25,6 +25,7 @@ for s in 16 32 48; do
 done
 install -Dm644 "$root/README.md" "$stage/usr/share/doc/mo4/README.md"
 install -Dm644 "$root/docs/PROTOCOL.md" "$stage/usr/share/doc/mo4/PROTOCOL.md"
+install -Dm644 "$root/LICENSE" "$stage/usr/share/doc/mo4/copyright"
 size=$(du -sk "$stage" | cut -f1)
 
 mkdir -p "$stage/DEBIAN"

@@ -24,7 +24,7 @@ jobs:
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           mkdir -p dist pkg/mo4/linux
           linux/package-deb.sh dist
-          cp target/release/mo4 assets/mo4.png README.md pkg/mo4/
+          cp target/release/mo4 assets/mo4.png README.md LICENSE pkg/mo4/
           cp -r linux/install.sh linux/70-mo4.rules linux/mo4.desktop linux/icons pkg/mo4/linux/
           tar -C pkg -czf "dist/mo4-$version-linux-x64.tar.gz" mo4
           ls -la dist
@@ -47,7 +47,7 @@ jobs:
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           New-Item -ItemType Directory -Force dist, pkg/mo4 | Out-Null
-          Copy-Item target/release/mo4.exe, README.md pkg/mo4/
+          Copy-Item target/release/mo4.exe, README.md, LICENSE pkg/mo4/
           Compress-Archive -Path pkg/mo4 -DestinationPath "dist/mo4-$version-windows-x64.zip"
           Get-ChildItem dist
       - uses: actions/upload-artifact@v4

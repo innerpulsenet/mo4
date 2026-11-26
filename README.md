@@ -198,4 +198,5 @@ to say what the app works with.
 
 ## License
 
-No license has been chosen yet, so for now the default applies: all rights reserved.
+MIT: see [LICENSE](LICENSE). The bundled fonts keep their own license, the SIL Open
+Font License, in `assets/fonts`.
