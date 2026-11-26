@@ -176,7 +176,41 @@ briefly with a different serial string. What caused that is still not known.
   does not stop when one is accepted.
 
 More guessing is a poor way forward from here. Something that already speaks to the
-pipe would settle it (a service tool, or the headphones' own firmware).
+pipe would settle it, such as a service tool. The headphones' own firmware would too,
+and it cannot be read (next).
+
+#### The firmware image
+
+The command table is in the headphones' firmware, and the firmware is published, but
+encrypted. Looked at on 2026-11-26:
+
+- Sennheiser's firmware service lists the releases for the MOMENTUM 4 under its
+  article number, `509266`:
+  `https://api.s-consumer-cloud.com/firmware/api/v2/availableSystemReleases/509266?os_type=android`
+  returned eleven, from 2.6.13 to 3.38.3. Putting `systemRelease/509266/<version>` in
+  place of `availableSystemReleases/509266` lists a release's packages: the full
+  firmware and the voice prompts, each in eight languages, on
+  `firmware.s-consumer-cloud.com`.
+- Every package of every release has a name like
+  `herakles-mars-003-038-003-dfu-encrypted-full-en.bin.zip.enc`. That reads as two
+  layers: a wrapper the phone app takes off, around an update image that is itself
+  encrypted for the headphones.
+- The English full package of 3.38.3 is 2,089,712 bytes (SHA-256
+  `3a16a9ab0f7c90a7503bbbed5f47093fb938c96fa7c628ca08ee286610f87820`). It has no zip
+  header, no Qualcomm update header and no readable text, its bytes are spread as
+  evenly as random data, no 16-byte block repeats, and its length is a multiple of 16.
+  So the wrapper is real encryption, most likely a block cipher.
+
+MO4 does not decrypt it and nothing from the image is in this repository. The key to
+the wrapper would have to be taken out of the phone app. If the inner image is
+encrypted the way its name says, the key to that is in the headphones' chip and not
+in the app, so the first key alone would not show the table. That second part is a
+reading of the file name; the inside has not been seen.
+
+What the pipe has shown so far (a Bluetooth address, what looks like its write, a
+power-off that outlasts a replug) looks more like a factory or service interface than
+a way to the settings. That is a guess from a handful of frames. If it is right, noise
+control and the equalizer may not be on the pipe at all.
 
 ## Frames
 
