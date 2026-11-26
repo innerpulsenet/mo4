@@ -56,39 +56,99 @@ hardware.
 
 Plugged in by cable the headphones are a USB audio device (`3542:1000`) with two HID
 interfaces. Interface 4 is ordinary media and telephony keys. Interface 0 is a raw
-pipe: report id `0x10`, 32 bytes each way. **No project documents what it speaks**,
-and none controls the headphones over the cable. `mo4 usb-probe` exists to find out.
+pipe: usage page 1, usage 0, report id `0x10`, 32 bytes each way, no feature reports.
+The MOMENTUM 5 (`3542:1004`) is reported to have an interface of the same shape.
+**No project documents what it speaks**, and none controls the headphones over the
+cable. `mo4 usb-probe` exists to find out, on Linux and on Windows. MO4 still cannot
+control anything this way: the outside of a frame is worked out, and no command the
+headphones accept has been found.
 
-What has been seen on one unit (USB device version 29.11, 2026-11-26):
+Everything below was seen on one unit (an M4AEBT SE on firmware 3.38.3, USB device
+version 29.11, 2026-11-26), first from Linux and then from Windows 11 with the same
+answers. About fifty frames were sent in all.
 
-- The pipe is silent on its own, and stays silent while the ear cup is tapped and
-  swiped and the headphones are taken off and put on. So does the media-key
-  interface: over the cable, gestures never reach the computer.
-- It does answer. A Bluetooth-style read of the model name, placed at the start of a
-  report and zero-padded, got one report back within the listening window:
+#### Where the format comes from
 
-  ```
-  TX 10 | FF 03 00 00 04 95 12 06 00 ...
-  RX 10 | FD 03 00 00 06 00 00 00 00 ...
-  ```
+Sennheiser's BTD 700 dongle (`3542:3001`) has a desktop program, and what that program
+sends has been worked out by
+[sobalap/btd700ctl](https://github.com/sobalap/btd700ctl) and repeated by several
+others ([phatnguyen-v1/btd700-tray](https://github.com/phatnguyen-v1/btd700-tray),
+[steph4n-gh/signal-deck](https://github.com/steph4n-gh/signal-deck)). The dongle takes
+`34 FE <command> <length> <arguments>` in a 64-byte report and answers `34 FF <command>
+<length> <data>`. It sends `FC` on its own when something changes, and the computer
+acknowledges that with `FD`. The headphones use the same four first bytes, with one
+byte more behind them, and their command numbers are not the dongle's.
 
-  That is not a reply in the Bluetooth protocol (which would be `FF 03 00 0D 04 95 13
-  06` and the name). It looks like a short status or refusal in a protocol of the
-  pipe's own: the first byte differs from ours by two, the second repeats ours, and
-  one more byte is set. One exchange is not enough to say what any of it means.
-- Two more reads got the identical reply, byte for byte: the battery
-  (`FF 03 00 00 04 95 06 03`) and the Qualcomm API version (`FF 03 00 00 00 1D 00
-  00`). The reply does not depend on the vendor or the command asked for, so it is a
-  blanket "not understood" and gives nothing away about the format the pipe wants.
-- No USB event followed any of the three writes. Between the first and the second,
-  about 100 seconds after one and 30 seconds before the next, the headphones' USB
-  function dropped and came back twice within three seconds (the hub inside them
-  stayed up, so it was not the cable), once briefly with a different serial string.
-  What caused that is not known.
+#### What a frame looks like
 
-So the cable has a control protocol, it is not the Bluetooth one carried as is, and
-MO4 cannot speak it. Working it out blind, with no official desktop tool to compare
-against, would mean many more guessed writes; that was not pursued.
+```
+sent      FE | route | b2 | b3 | the rest (zeros in everything tried so far)
+answered  FD | route, turned around | b2 | b3 | code | zeros
+```
+
+Every frame got exactly one answer, within about 20 ms, and every answer so far is
+this refusal. Nothing arrives unasked: the pipe stays silent while the ear cup is
+tapped and swiped and the headphones are taken off and put on, and so does the
+media-key interface. Over the cable, gestures never reach the computer.
+
+- **First byte.** Only `FE` is taken as a command. `FC`, `FD` and `FF` were each
+  refused with code `06`, whatever followed. That is why a Bluetooth frame placed in a
+  report as is (`FF 03 ...`) gets `FD 03 00 00 06` back for any command in it.
+- **Route.** The second byte is two halves, to and from. The headphones answer as 1
+  and as 5: `10` comes back as `01`, `12` as `21`, `1F` as `F1`, `50` as `05`, `51` as
+  `15`. Every other first half (0, 2 to 4, 6 to F, all tried) comes back unchanged.
+  What 1 and 5 are is not known, and neither is whether the second half matters: with
+  1 in the first half, 0, 1, 2, 5, 6, 7, 8 and F in the second were all refused alike.
+- **b2 and b3** come back as sent. Whether they are one 16-bit command, or a command
+  and a length as on the dongle, is not known.
+- **Code.** With route `10` the code follows b2 and ignores b3: `04` and `06` in b2
+  gave code `04`, `00` and `12` gave code `05`. Which of the two means "no such
+  command" and which "wrong arguments" is not known. A route nobody answers gave code
+  `05` in every frame tried (all with b2 `00`).
+
+#### What was sent
+
+| Sent | Answer | Why it was tried |
+|---|---|---|
+| `FF 03 00 00 04 95 12 06` | `FD 03 00 00 06` | the Bluetooth model read as is (battery and the Qualcomm version read got the same) |
+| `FC 03`, `FD 03` | `FD 03 00 00 06` | the other first bytes the dongle uses |
+| `FE xx` for 30 other values of `xx` | `FD xx 00 00 05`, `xx` turned around when it starts with 1 or 5 | to find what the second byte is |
+| `FE 10 00 00` | `FD 01 00 00 05` | |
+| `FE 10 12 00` | `FD 01 12 00 05` | the dongle's firmware read, and the first half of the Bluetooth ones |
+| `FE 10 12 06` | `FD 01 12 06 05` | Bluetooth model read `1206` |
+| `FE 10 12 01` | `FD 01 12 01 05` | Bluetooth firmware read `1201` |
+| `FE 10 06 03` | `FD 01 06 03 04` | Bluetooth battery read `0603` |
+| `FE 10 06 00` | `FD 01 06 00 04` | the dongle's state read |
+| `FE 10 04 95 12 06` | `FD 01 04 95 04` | vendor `0495`, then the model read |
+| `FE 10 04 04 95 12 06` | `FD 01 04 04 04` | a length, then vendor and model read |
+
+So neither the Bluetooth command words nor the dongle's command numbers work behind a
+route the headphones answer on, in any arrangement tried.
+
+#### Before sending anything else
+
+- No frame sent so far did anything that could be seen from the computer: the USB
+  device was still there after each batch. The settings were not read back over
+  Bluetooth afterwards, so that is all that can be said.
+- During the first session on Linux, between two writes (about 100 seconds after one
+  and 30 seconds before the next), the headphones' USB function dropped and came back
+  twice within three seconds, once briefly with a different serial string (the
+  headphones' string table also holds `ABCDEF0123456789`, at index 3, which may be
+  what showed). The hub inside them stayed up, so it was not the cable. What caused it
+  is not known, and it was not seen again.
+- Do not walk through the values of b2 or b3 to see which ones the headphones react
+  to. The dongle has a factory reset at `13` and a disconnect at `14`. In the
+  Bluetooth protocol the `06xx` commands include a power-off (`0605`) and a reboot
+  (`060F`) according to
+  [Asfax03L/momentum-5-control](https://github.com/Asfax03L/momentum-5-control), and
+  `06` is one of the two values of b2 the pipe treats differently. Whether either
+  numbering carries over is exactly what is not known.
+- `mo4 usb-probe` listens and sends nothing. `mo4 usb-probe --send "FE 10 06 03"`
+  sends that frame, zero-padded to 32 bytes, and prints the answer; it sends whatever
+  it is given.
+
+More guessing is unlikely to settle it. Something that already speaks to the pipe
+would (a service tool, or the headphones' own firmware).
 
 ## Frames
 
@@ -226,4 +286,6 @@ and leaves those command words alone on such firmware.
   headset only.
 - The Windows program builds and passes its tests on GitHub, and its transport has
   **not** been run against headphones.
-- The USB pipe is not usable (see Transport).
+- **The USB pipe answers, and no command it accepts is known** (see USB under
+  Transport). `mo4 usb-probe` has been run against headphones on Linux and on
+  Windows 11; on Windows that is the only part of MO4 that has.

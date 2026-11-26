@@ -71,6 +71,16 @@ fn services(device: &BluetoothDevice, mode: BluetoothCacheMode) -> io::Result<Ve
 }
 
 pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
+    discover_bluetooth(target).map_err(|e| {
+        if usb_headphones().is_some() {
+            format!("{e}. The headphones are plugged in over USB, but their settings are only reachable over Bluetooth")
+        } else {
+            e
+        }
+    })
+}
+
+fn discover_bluetooth(target: &Target) -> Result<Vec<Endpoint>, String> {
     let fail = |e: io::Error| format!("Could not list Bluetooth devices ({e})");
     let selector = BluetoothDevice::GetDeviceSelectorFromPairingState(true).map_err(|e| fail(err(e)))?;
     let found = wait(DeviceInformation::FindAllAsyncAqsFilter(&selector).map_err(|e| fail(err(e)))?, LOOKUP_TIMEOUT).map_err(fail)?;
@@ -186,5 +196,142 @@ impl Drop for Stream {
     fn drop(&mut self) {
         // Closing the socket ends the reader thread's pending read.
         let _ = self.socket.Close();
+    }
+}
+
+// --- USB -------------------------------------------------------------------------
+
+use windows::Win32::Devices::DeviceAndDriverInstallation::{
+    CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_ListW, CR_SUCCESS,
+};
+use windows::Win32::Devices::HumanInterfaceDevice::HidD_GetHidGuid;
+use windows::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadFile, WriteFile};
+use windows::Win32::System::IO::{CancelIo, GetOverlappedResult, OVERLAPPED};
+use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
+use windows::core::PCWSTR;
+
+use super::usb::{PRODUCT, Pipe, REPORT_LEN, VENDOR};
+
+/// The device path of the headphones' vendor HID interface (interface 0), when they
+/// are plugged in over USB.
+fn usb_headphones() -> Option<String> {
+    let wanted = format!("vid_{VENDOR}&pid_{PRODUCT}&mi_00");
+    unsafe {
+        let class = HidD_GetHidGuid();
+        let mut len = 0u32;
+        if CM_Get_Device_Interface_List_SizeW(&mut len, &class, PCWSTR::null(), CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS {
+            return None;
+        }
+        // The list is the paths one after another, each ended by a zero.
+        let mut list = vec![0u16; len as usize];
+        if CM_Get_Device_Interface_ListW(&class, PCWSTR::null(), &mut list, CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS {
+            return None;
+        }
+        list.split(|c| *c == 0).map(String::from_utf16_lossy).find(|path| path.to_ascii_lowercase().contains(&wanted))
+    }
+}
+
+/// The interface opened for overlapped I/O, so a read can wait with a timeout while
+/// writes go out on the same handle.
+struct HidPipe {
+    file: HANDLE,
+    reading: Box<OVERLAPPED>,
+    writing: Box<OVERLAPPED>,
+    /// Where a read in flight puts its report. Boxed, like the two above, because
+    /// Windows keeps the addresses until the read completes.
+    inbox: Box<[u8; 1 + REPORT_LEN]>,
+    /// A read has been started and its report not yet collected.
+    in_flight: bool,
+}
+
+fn pending(e: &windows::core::Error) -> bool {
+    e.code() == ERROR_IO_PENDING.to_hresult()
+}
+
+pub fn usb_open() -> Result<(String, Box<dyn Pipe>), String> {
+    let path = usb_headphones().ok_or(format!("No MOMENTUM 4 found on USB (looking for {VENDOR}:{PRODUCT})"))?;
+    let wide: Vec<u16> = path.encode_utf16().chain([0]).collect();
+    let fail = |e: windows::core::Error| format!("Could not open the USB control pipe ({})", e.message());
+    unsafe {
+        let file = CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            (GENERIC_READ | GENERIC_WRITE).0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED,
+            None,
+        )
+        .map_err(fail)?;
+        let event = || CreateEventW(None, true, false, PCWSTR::null()).map(|event| Box::new(OVERLAPPED { hEvent: event, ..Default::default() }));
+        let (reading, writing) = match (event(), event()) {
+            (Ok(r), Ok(w)) => (r, w),
+            (r, w) => {
+                for o in [&r, &w].into_iter().flatten() {
+                    let _ = CloseHandle(o.hEvent);
+                }
+                let _ = CloseHandle(file);
+                return Err(fail(r.err().or(w.err()).unwrap()));
+            }
+        };
+        let pipe = HidPipe { file, reading, writing, inbox: Box::new([0; 1 + REPORT_LEN]), in_flight: false };
+        Ok((format!("MOMENTUM 4 on USB ({VENDOR}:{PRODUCT}, interface 0)"), Box::new(pipe)))
+    }
+}
+
+impl Pipe for HidPipe {
+    fn write(&mut self, report: &[u8]) -> io::Result<()> {
+        unsafe {
+            let _ = ResetEvent(self.writing.hEvent);
+            match WriteFile(self.file, Some(report), None, Some(&mut *self.writing)) {
+                Ok(()) => {}
+                Err(e) if pending(&e) => {}
+                Err(e) => return Err(err(e)),
+            }
+            // `report` must stay put until the write is over, so wait for it here.
+            let mut sent = 0u32;
+            GetOverlappedResult(self.file, &*self.writing, &mut sent, true).map_err(err)
+        }
+    }
+
+    fn read(&mut self, buf: &mut [u8], timeout: Duration) -> io::Result<usize> {
+        unsafe {
+            if !self.in_flight {
+                let _ = ResetEvent(self.reading.hEvent);
+                match ReadFile(self.file, Some(&mut self.inbox[..]), None, Some(&mut *self.reading)) {
+                    Ok(()) => {}
+                    Err(e) if pending(&e) => {}
+                    Err(e) => return Err(err(e)),
+                }
+                self.in_flight = true;
+            }
+            let ms = timeout.as_millis().min(u128::from(u32::MAX - 1)) as u32;
+            if WaitForSingleObject(self.reading.hEvent, ms) != WAIT_OBJECT_0 {
+                return Ok(0);
+            }
+            self.in_flight = false;
+            let mut got = 0u32;
+            GetOverlappedResult(self.file, &*self.reading, &mut got, false).map_err(err)?;
+            let n = (got as usize).min(buf.len()).min(self.inbox.len());
+            buf[..n].copy_from_slice(&self.inbox[..n]);
+            Ok(n)
+        }
+    }
+}
+
+impl Drop for HidPipe {
+    fn drop(&mut self) {
+        unsafe {
+            if self.in_flight {
+                // The read still owns `inbox` and `reading`; end it before they are freed.
+                let _ = CancelIo(self.file);
+                let mut got = 0u32;
+                let _ = GetOverlappedResult(self.file, &*self.reading, &mut got, true);
+            }
+            let _ = CloseHandle(self.reading.hEvent);
+            let _ = CloseHandle(self.writing.hEvent);
+            let _ = CloseHandle(self.file);
+        }
     }
 }

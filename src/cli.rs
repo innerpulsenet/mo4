@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::client::Client;
 use crate::device::{self, ANTI_WIND, Device, NoiseMode, PROMPT_MODES, SOUND_MODES, Setting};
-use crate::link::Target;
+use crate::link::{Target, usb};
 use crate::store;
 
 pub const HELP: &str = "\
@@ -19,8 +19,11 @@ MO4: control for Sennheiser MOMENTUM 4 headphones
   mo4 eq <preset>             apply a preset by name (for example: mo4 eq classic rock)
   mo4 presets                 list presets
   mo4 watch                   print changes as the headphones report them
-  mo4 usb-probe [--query] [--seconds N]
-                              look at the USB control pipe (Linux, experimental)
+  mo4 usb-probe [--seconds N]
+                              listen on the USB control pipe (experimental)
+  mo4 usb-probe --send \"FE 10 06 03\" [--send ...] [--seconds N]
+                              send raw frames down it and print the replies; read
+                              docs/PROTOCOL.md first
 
 Settings:
   mode                  adaptive | custom | off
@@ -276,11 +279,18 @@ pub fn run(args: &[String], target: &Target, trace: bool) -> Result<(), String> 
                 }
             }
         }
-        #[cfg(target_os = "linux")]
         Some("usb-probe") => {
-            let query = args.iter().any(|a| a == "--query");
-            let seconds = args.iter().position(|a| a == "--seconds").and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(5);
-            crate::link::usb_probe(seconds, query)?;
+            let mut seconds = None;
+            let mut frames = Vec::new();
+            let mut rest = args[1..].iter();
+            while let Some(a) = rest.next() {
+                match a.as_str() {
+                    "--seconds" => seconds = Some(rest.next().and_then(|s| s.parse().ok()).ok_or("--seconds needs a whole number")?),
+                    "--send" => frames.push(usb::parse_frame(rest.next().ok_or("--send needs a frame in hex, like \"FE 10 06 03\"")?)?),
+                    other => return Err(format!("usb-probe does not take \"{other}\" (see mo4 help)")),
+                }
+            }
+            usb::probe(seconds, &frames)?;
         }
         Some(other) => return Err(format!("unknown command \"{other}\" (see mo4 help)")),
         None => unreachable!("the window handles no command"),

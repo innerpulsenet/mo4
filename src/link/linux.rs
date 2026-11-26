@@ -339,10 +339,7 @@ pub fn discover(target: &Target) -> Result<Vec<Endpoint>, String> {
 
 // --- USB -------------------------------------------------------------------------
 
-const USB_VENDOR: &str = "3542";
-const USB_PRODUCT: &str = "1000";
-const USB_REPORT_ID: u8 = 0x10;
-const USB_REPORT_LEN: usize = 32;
+use super::usb::{PRODUCT, Pipe, VENDOR};
 
 /// The hidraw node of the headphones' vendor HID interface (interface 0), when they
 /// are plugged in over USB.
@@ -350,7 +347,7 @@ fn usb_headphones() -> Option<PathBuf> {
     for entry in fs::read_dir("/sys/class/hidraw").ok()?.flatten() {
         let dev = entry.path().join("device");
         let uevent = fs::read_to_string(dev.join("uevent")).unwrap_or_default();
-        let id = format!("0003:0000{}:0000{}", USB_VENDOR, USB_PRODUCT).to_uppercase();
+        let id = format!("0003:0000{VENDOR}:0000{PRODUCT}").to_uppercase();
         if !uevent.to_uppercase().contains(&id) {
             continue;
         }
@@ -362,13 +359,10 @@ fn usb_headphones() -> Option<PathBuf> {
     None
 }
 
-/// Look at the headphones' USB control pipe. Nobody has documented what it speaks, so
-/// this only listens unless `query` is set, in which case it sends one harmless read
-/// (the model name) wrapped the most likely way and prints whatever comes back.
-pub fn usb_probe(seconds: u64, query: bool) -> Result<(), String> {
-    let path = usb_headphones().ok_or("No MOMENTUM 4 found on USB (looking for 3542:1000)")?;
-    println!("USB control pipe: {}", path.display());
-    println!("Reports: id 0x{USB_REPORT_ID:02X}, {USB_REPORT_LEN} bytes each way");
+struct HidRaw(OwnedFd);
+
+pub fn usb_open() -> Result<(String, Box<dyn Pipe>), String> {
+    let path = usb_headphones().ok_or(format!("No MOMENTUM 4 found on USB (looking for {VENDOR}:{PRODUCT})"))?;
     let c_path = std::ffi::CString::new(path.to_string_lossy().as_bytes()).unwrap();
     let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR | libc::O_NONBLOCK | libc::O_CLOEXEC) };
     if fd < 0 {
@@ -379,37 +373,29 @@ pub fn usb_probe(seconds: u64, query: bool) -> Result<(), String> {
             format!("Could not open {}: {e}", path.display())
         });
     }
-    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-    if query {
-        let frame = crate::proto::Frame::new(crate::proto::cmd::MODEL_GET, &[]).encode();
-        let mut report = vec![0u8; 1 + USB_REPORT_LEN];
-        report[0] = USB_REPORT_ID;
-        report[1..1 + frame.len()].copy_from_slice(&frame);
-        println!("TX {}", crate::proto::hex(&report));
-        let n = unsafe { libc::write(fd.as_raw_fd(), report.as_ptr().cast(), report.len()) };
-        if n < 0 {
-            return Err(format!("Write failed: {}", io::Error::last_os_error()));
-        }
+    Ok((path.display().to_string(), Box::new(HidRaw(unsafe { OwnedFd::from_raw_fd(fd) }))))
+}
+
+impl Pipe for HidRaw {
+    fn write(&mut self, report: &[u8]) -> io::Result<()> {
+        let n = unsafe { libc::write(self.0.as_raw_fd(), report.as_ptr().cast(), report.len()) };
+        if n < 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
-    println!("Listening for {seconds} s{}", if query { "" } else { " (nothing is sent)" });
-    let deadline = Instant::now() + Duration::from_secs(seconds);
-    let mut buf = [0u8; 256];
-    let mut seen = 0;
-    while Instant::now() < deadline {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if poll(fd.as_raw_fd(), libc::POLLIN, left.min(Duration::from_millis(250))).map_err(|e| e.to_string())? == 0 {
-            continue;
+
+    fn read(&mut self, buf: &mut [u8], timeout: Duration) -> io::Result<usize> {
+        if poll(self.0.as_raw_fd(), libc::POLLIN, timeout)? == 0 {
+            return Ok(0);
         }
-        let n = unsafe { libc::read(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
+        let n = unsafe { libc::read(self.0.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
         if n > 0 {
-            seen += 1;
-            println!("RX {}", crate::proto::hex(&buf[..n as usize]));
-        } else if n == 0 {
-            return Err("The headphones went away".into());
+            return Ok(n as usize);
         }
+        if n == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the USB device is gone"));
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() == io::ErrorKind::WouldBlock { Ok(0) } else { Err(e) }
     }
-    println!("{seen} report(s) received");
-    Ok(())
 }
 
 #[cfg(test)]

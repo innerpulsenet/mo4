@@ -1,13 +1,13 @@
 //! The byte pipe to the headphones: Bluetooth RFCOMM on each platform, or the simulator.
+//! The USB cable's own control pipe is in `usb`; nothing here uses it for control.
 
 use std::io;
 use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "linux")]
-pub use linux::usb_probe;
 pub mod sim;
+pub mod usb;
 #[cfg(windows)]
 mod windows;
 
