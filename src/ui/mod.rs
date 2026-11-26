@@ -191,6 +191,10 @@ impl eframe::App for App {
     }
 }
 
+/// Room kept at the right of the foot for the version and the maker's mark; the message
+/// line stops short of it.
+const FOOT_MARK_W: f32 = 204.0;
+
 impl App {
     fn send(&mut self, s: Setting) {
         self.holds.insert(s.slot(), (s.clone(), Instant::now()));
@@ -655,7 +659,7 @@ impl App {
     fn footer(&mut self, ui: &mut Ui, foot: Rect) {
         let p = ui.painter().clone();
         let cy = foot.center().y;
-        let area = Rect::from_min_max(foot.min, pos2(foot.right() - 130.0, foot.bottom()));
+        let area = Rect::from_min_max(foot.min, pos2(foot.right() - FOOT_MARK_W, foot.bottom()));
         let resp = ui.interact(area, ui.id().with("footer"), Sense::click()).on_hover_text("Click for the history");
         if resp.clicked() {
             self.show_log = !self.show_log;
@@ -667,7 +671,7 @@ impl App {
         }
         if let (Some(hint), None, false) = (self.hint, &self.notice, fresh) {
             p.with_clip_rect(area).text(pos2(foot.left() + 16.0, cy), Align2::LEFT_CENTER, hint, sans(12.0), steel::TEXT_2);
-            self.foot_mark(&p, foot);
+            self.foot_mark(ui, foot);
             return;
         }
         let line = match (&self.notice, self.snap.log.back()) {
@@ -690,13 +694,22 @@ impl App {
             let clip = p.with_clip_rect(area);
             clip.text(pos2(t.right() + 12.0, cy), Align2::LEFT_CENTER, text, mono(11.0), color);
         }
-        self.foot_mark(&p, foot);
+        self.foot_mark(ui, foot);
     }
 
-    fn foot_mark(&self, p: &egui::Painter, foot: Rect) {
+    /// The right end of the foot: which build this is, then who made it.
+    fn foot_mark(&self, ui: &mut Ui, foot: Rect) {
+        let p = ui.painter().clone();
         let cy = foot.center().y;
         let t = p.text(pos2(foot.right() - 16.0, cy), Align2::RIGHT_CENTER, "innerpulse", mono(11.0), steel::TEXT_3);
-        widgets::mark(p, Rect::from_center_size(pos2(t.left() - 13.0, cy), vec2(13.0, 12.0)), steel::EMBER);
+        let mark = Rect::from_center_size(pos2(t.left() - 13.0, cy), vec2(13.0, 12.0));
+        widgets::mark(&p, mark, steel::EMBER);
+        let v = p.text(pos2(mark.left() - 18.0, cy), Align2::RIGHT_CENTER, format!("MO4 {}", crate::VERSION), mono(11.0), steel::TEXT_3);
+        let built = match crate::COMMIT {
+            Some(commit) => format!("MO4 {}, built from commit {commit}", crate::VERSION),
+            None => format!("MO4 {}", crate::VERSION),
+        };
+        ui.interact(v.expand2(vec2(6.0, 8.0)), ui.id().with("version"), Sense::hover()).on_hover_text(built);
     }
 
     /// The history: a sheet of glass over the foot of the window.
@@ -718,7 +731,7 @@ impl App {
             let clip = p.with_clip_rect(card.shrink(8.0));
             clip.text(pos2(card.left() + 86.0, y), Align2::LEFT_CENTER, &l.text, mono(11.0), if l.tone == Tone::Bad { steel::ERR } else { steel::TEXT_2 });
         }
-        if ui.input(|i| i.pointer.any_click()) && !ui.rect_contains_pointer(Rect::from_min_max(foot.min, pos2(foot.right() - 130.0, foot.bottom()))) {
+        if ui.input(|i| i.pointer.any_click()) && !ui.rect_contains_pointer(Rect::from_min_max(foot.min, pos2(foot.right() - FOOT_MARK_W, foot.bottom()))) {
             self.show_log = false;
         }
     }

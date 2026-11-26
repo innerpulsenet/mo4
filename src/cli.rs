@@ -48,6 +48,7 @@ Options:
   --channel N                use this RFCOMM channel (Linux)
   --sim                      talk to a simulated headset (made-up values)
   --trace                    print every frame sent and received
+  --version                  print the version and the commit it was built from
 ";
 
 const KEYS: [&str; 15] = [
@@ -146,6 +147,10 @@ pub fn parse_setting(key: &str, v: &str) -> Result<Setting, String> {
 }
 
 fn connect(target: &Target, trace: bool) -> Result<Client, String> {
+    if trace {
+        // A trace goes into bug reports, so it says which build made it.
+        eprintln!("{}", crate::version_line());
+    }
     let mut client = Client::connect(target, trace, &mut |_| {}).map_err(|e| match usb::cable() {
         Some(_) if !target.sim => format!("{e}. The headphones are plugged in over USB, but their settings are only reachable over Bluetooth"),
         _ => e,

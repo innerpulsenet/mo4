@@ -133,8 +133,9 @@ mo4 status --trace
 ```
 
 It prints each frame sent and received, then everything the headphones report. If that
-works, the window will too. If it fails, the trace is what to put in a bug report (it
-includes the serial number, which you may want to remove).
+works, the window will too. If it fails, the trace is what to put in a bug report: it
+starts with the version of MO4 that made it (and it includes the serial number, which
+you may want to remove).
 
 ## Command line
 
@@ -152,8 +153,9 @@ mo4 help                    the settings and their values
 ```
 
 Options: `--addr AA:BB:CC:DD:EE:FF` to use one device instead of searching,
-`--channel N` to name the RFCOMM channel (Linux), `--trace` to print every frame, and
-`--sim` to talk to the built-in simulated headset.
+`--channel N` to name the RFCOMM channel (Linux), `--trace` to print every frame,
+`--sim` to talk to the built-in simulated headset, and `--version` to print the version
+and the commit it was built from. The window shows the version at the bottom right.
 
 ## What it will not do
 

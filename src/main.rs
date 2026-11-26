@@ -12,6 +12,20 @@ mod ui;
 
 use link::Target;
 
+/// The version in Cargo.toml.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The commit this was built from, when it was built inside the repository.
+pub const COMMIT: Option<&str> = option_env!("MO4_COMMIT");
+
+/// "mo4 0.6.0 (1a2b3c4)": what `--version` prints and what a trace starts with.
+pub fn version_line() -> String {
+    match COMMIT {
+        Some(commit) => format!("mo4 {VERSION} ({commit})"),
+        None => format!("mo4 {VERSION}"),
+    }
+}
+
 /// A windowed program on Windows has no console; borrow the one it was started from so
 /// the command line can print.
 fn attach_console() {
@@ -33,6 +47,11 @@ fn main() {
         match a.as_str() {
             "--sim" => target.sim = true,
             "--trace" => trace = true,
+            "--version" | "-V" => {
+                attach_console();
+                println!("{}", version_line());
+                return;
+            }
             "--addr" => match args.next().as_deref().and_then(link::parse_addr) {
                 Some(addr) => target.addr = Some(addr),
                 None => fail("--addr needs a Bluetooth address like AA:BB:CC:DD:EE:FF"),
