@@ -73,6 +73,18 @@ pub fn hz_label(hz: u16) -> String {
     }
 }
 
+/// A frequency read off the graph, to three figures: "86 Hz", "315 Hz", "1.25 kHz",
+/// "12.5 kHz".
+pub fn hz_reading(hz: f32) -> String {
+    if hz < 999.5 {
+        format!("{hz:.0} Hz")
+    } else if hz < 9995.0 {
+        format!("{:.2} kHz", hz / 1000.0)
+    } else {
+        format!("{:.1} kHz", hz / 1000.0)
+    }
+}
+
 /// A frequency in words: "325 Hz", "6.5 kHz".
 pub fn hz_words(hz: u16) -> String {
     let label = hz_label(hz);
@@ -189,6 +201,10 @@ mod tests {
         assert_eq!(hz_label(1500), "1.5k");
         assert_eq!(hz_label(8000), "8k");
         assert_eq!(hz_words(6500), "6.5 kHz");
+        assert_eq!(hz_reading(86.4), "86 Hz");
+        assert_eq!(hz_reading(999.7), "1.00 kHz");
+        assert_eq!(hz_reading(1254.0), "1.25 kHz");
+        assert_eq!(hz_reading(12_460.0), "12.5 kHz");
     }
 
     #[test]

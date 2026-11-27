@@ -595,6 +595,28 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
     p.add(egui::Shape::mesh(mesh));
     p.add(egui::Shape::line(line.clone(), Stroke::new(2.0, color)));
 
+    // Under the pointer: a hairline, a mark on the curve, and what the curve is at that
+    // frequency, written in the screen's top margin where no node's figure can reach.
+    // Whether the pointer is on the screen is last frame's answer from the bands
+    // themselves, so nothing is drawn while something else lies over the screen.
+    let pointed = ui.id().with("eq-pointed");
+    let on_screen = ui.ctx().data(|d| d.get_temp::<bool>(pointed)).unwrap_or(false);
+    let pointer = ui.input(|i| i.pointer.hover_pos()).filter(|at| on_screen && plot.expand2(vec2(0.0, 4.0)).contains(*at));
+    if let (Some(b), Some(at)) = (measured, pointer) {
+        let t = ((at.x - plot.left()) / plot.width()).clamp(0.0, 1.0);
+        let hz = bands::hz_at(t);
+        let db: Vec<f32> = view.shown.iter().map(|g| f32::from(*g) / 10.0 * rise).collect();
+        let level = bands::response(b, &db, hz);
+        let x = steel::px(ui.ctx(), plot.left() + plot.width() * t);
+        p.line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.22)));
+        let on_curve = pos2(x, y_of(level * 10.0));
+        p.circle_filled(on_curve, 3.5, steel::INK);
+        p.circle_stroke(on_curve, 3.5, Stroke::new(1.5, steel::TEXT));
+        // A level that rounds to nothing is written without a sign.
+        let level = if level.abs() < 0.05 { "0.0 dB".to_string() } else { format!("{level:+.1} dB") };
+        p.text(pos2(plot.left() + 10.0, rect.top() + 9.0), Align2::LEFT_CENTER, format!("{}  {level}", bands::hz_reading(hz)), mono_bold(11.0), steel::TEXT);
+    }
+
     // One column per band takes the pointer.
     let ctx = ui.ctx();
     let fine = ctx.input(|i| i.modifiers.shift);
@@ -741,6 +763,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         let on_node = nodes[band].distance(at) < 14.0;
         event.about = (on_axis || on_node).then_some(band);
     }
+    ctx.data_mut(|d| d.insert_temp(pointed, event.hovered.is_some()));
     if curve != view.shown {
         event.curve = Some(curve);
     }

@@ -49,6 +49,8 @@ sound.
   curve part ways where a band gives less than is set or its neighbors add to it.
 - Point at a node to see that band's own share of the curve, what kind of filter it
   is, and what the headphones call it.
+- Point anywhere on the graph to read the curve there: the frequency under the pointer
+  and how many dB the curve adds or takes away at it.
 - Drag a node, scroll over a band, or use the arrow keys. Steps are half a dB, a tenth
   with Shift held. Double-click a node to zero it.
 - A lamp says whether the curve is on the headphones, and what the headphones hold is
