@@ -56,6 +56,8 @@ struct App {
     delete_asked: Option<Instant>,
     /// When the Hi-Res switch was first pressed; it goes on at the second press.
     hi_res_asked: Option<Instant>,
+    /// The paired device whose CONNECT key was pressed once, and when.
+    connect_asked: Option<(u8, Instant)>,
     /// The same for SWITCH OFF on the USB card.
     off_asked: Option<Instant>,
     shot: Option<Shot>,
@@ -103,6 +105,7 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
                 hint: None,
                 delete_asked: None,
                 hi_res_asked: None,
+                connect_asked: None,
                 off_asked: None,
                 shot: shot.map(|(path, delay)| Shot { path, frames: 0, requested: false, started: Instant::now(), delay }),
             }))
@@ -194,9 +197,9 @@ impl eframe::App for App {
     }
 }
 
-/// How long the Hi-Res switch waits for its second press; the footer line that
-/// explains it lasts as long.
-const HI_RES_ASK: Duration = Duration::from_secs(6);
+/// How long a key that wants a second press (Hi-Res, connect) waits for it; the footer
+/// line that explains it lasts as long.
+const ASK_TIME: Duration = Duration::from_secs(6);
 
 /// A frequency in words: "325 Hz", "6.5 kHz".
 fn hz_words(hz: u16) -> String {
@@ -385,6 +388,7 @@ impl App {
                 p.text(pos2(inner.left(), y + 8.0), Align2::LEFT_CENTER, if online { "not reported" } else { "no reading" }, mono(11.0), steel::TEXT_3);
             }
             let rows = ((inner.bottom() - y) / 20.0).floor() as usize;
+            let (mut connect, mut ask) = (None, None);
             for (i, dev) in d.paired.iter().enumerate().take(rows) {
                 let cy = y + 9.0 + i as f32 * 20.0;
                 if i + 1 == rows && d.paired.len() > rows {
@@ -395,11 +399,38 @@ impl App {
                 let name = if dev.name.is_empty() { "unnamed device" } else { dev.name.as_str() };
                 let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 84.0, cy + 10.0)));
                 clip.text(pos2(inner.left() + 16.0, cy), Align2::LEFT_CENTER, name, sans(12.0), if dev.connected { steel::TEXT } else { steel::TEXT_3 });
+                let pending = self.holds.values().any(|(s, _)| matches!(s, Setting::Connect { index, .. } if *index == dev.index));
                 if d.own_index == Some(dev.index) {
                     p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "THIS COMPUTER", mono_bold(9.5), steel::TEXT_2);
                 } else if dev.connected {
                     p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTED", mono_bold(9.5), steel::TEXT_3);
+                } else if pending {
+                    p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTING", mono_bold(9.5), steel::TEXT_2);
+                } else if online && d.own_index.is_some() {
+                    // Only offered once the headphones have said which entry is this computer.
+                    let asking = self.connect_asked.is_some_and(|(i, at)| i == dev.index && at.elapsed() < ASK_TIME);
+                    let key = Rect::from_min_max(pos2(inner.right() - 72.0, cy - 9.0), pos2(inner.right(), cy + 9.0));
+                    let tip = if asking { "Press again to connect" } else { "Have the headphones connect to this device" };
+                    if widgets::key(ui, key, ("connect", dev.index), if asking { "REALLY?" } else { "CONNECT" }, asking, if asking { steel::AMBER } else { TINT }, true, false).on_hover_text(tip).clicked() {
+                        if asking {
+                            connect = Some(Setting::Connect { index: dev.index, name: dev.name.clone() });
+                        } else {
+                            let full = d.max_connections.is_some_and(|n| d.paired.iter().filter(|x| x.connected).count() >= usize::from(n));
+                            let caution = if full { " They are at their limit, so another device may be dropped." } else { "" };
+                            ask = Some((dev.index, format!("Press again and the headphones will try to connect to {name}.{caution}")));
+                        }
+                    }
                 }
+            }
+            if let Some((index, text)) = ask {
+                self.connect_asked = Some((index, Instant::now()));
+                self.note(text, Tone::Info);
+                ui.ctx().request_repaint_after(ASK_TIME);
+            }
+            if let Some(setting) = connect {
+                self.connect_asked = None;
+                self.notice = None;
+                self.send(setting);
             }
         }
     }
@@ -659,7 +690,7 @@ impl App {
         }
         y += 28.0;
         let v = held!(self, HiRes).or(d.hi_res);
-        let asking = v == Some(false) && self.hi_res_asked.is_some_and(|at| at.elapsed() < HI_RES_ASK);
+        let asking = v == Some(false) && self.hi_res_asked.is_some_and(|at| at.elapsed() < ASK_TIME);
         if !asking {
             self.hi_res_asked = None;
         }
@@ -669,7 +700,7 @@ impl App {
                 // Going on changes what the audio link carries, so it takes two presses.
                 self.hi_res_asked = Some(Instant::now());
                 self.note("Hi-Res changes the audio link and may interrupt playback. Press again to switch it on.", Tone::Info);
-                ui.ctx().request_repaint_after(HI_RES_ASK);
+                ui.ctx().request_repaint_after(ASK_TIME);
             } else {
                 self.hi_res_asked = None;
                 self.notice = None;

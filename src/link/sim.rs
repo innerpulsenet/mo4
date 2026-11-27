@@ -31,10 +31,14 @@ pub struct SimLink {
     touch_lock: bool,
     prompts: u8,
     hi_res: bool,
+    /// Which of [`PAIRED`] are connected.
+    links: [bool; 3],
 }
 
 const FREQS: [u16; 5] = [90, 325, 1500, 6500, 6500];
-const PAIRED: [(&str, u8); 3] = [("Simulated PC", 1), ("Simulated phone", 1), ("Simulated tablet", 0)];
+/// The first is the computer the app runs on.
+const PAIRED: [&str; 3] = ["Simulated PC", "Simulated phone", "Simulated tablet"];
+const MAX_CONNECTIONS: usize = 2;
 
 impl SimLink {
     pub fn new() -> SimLink {
@@ -60,6 +64,7 @@ impl SimLink {
             touch_lock: false,
             prompts: 2,
             hi_res: false,
+            links: [true, true, false],
         }
     }
 
@@ -228,13 +233,24 @@ impl SimLink {
             }
             cmd::PAIRED_COUNT_GET => self.reply(f, &[0, PAIRED.len() as u8]),
             cmd::PAIRED_INFO_GET if usize::from(arg) < PAIRED.len() => {
-                let (name, status) = PAIRED[usize::from(arg)];
-                let mut out = vec![arg, arg, status];
-                out.extend_from_slice(name.as_bytes());
+                let mut out = vec![arg, arg, u8::from(self.links[usize::from(arg)])];
+                out.extend_from_slice(PAIRED[usize::from(arg)].as_bytes());
                 out.push(0);
                 self.reply(f, &out);
             }
-            cmd::MAX_CONNECTIONS_GET => self.reply(f, &[2]),
+            cmd::MAX_CONNECTIONS_GET => self.reply(f, &[MAX_CONNECTIONS as u8]),
+            cmd::PAIRED_CONNECT if usize::from(arg) < PAIRED.len() && !p.is_empty() => {
+                self.links[usize::from(arg)] = true;
+                // What real headphones do at their limit is not known. The simulator
+                // keeps to its own: it drops another device, never the one asking.
+                while self.links.iter().filter(|l| **l).count() > MAX_CONNECTIONS {
+                    match (1..PAIRED.len()).find(|i| self.links[*i] && *i != usize::from(arg)) {
+                        Some(i) => self.links[i] = false,
+                        None => break,
+                    }
+                }
+                self.reply(f, &[]);
+            }
             cmd::OWN_INDEX_GET => self.reply(f, &[0]),
             // On the wire 0 is on and 1 is off.
             cmd::HI_RES_GET => self.reply(f, &[u8::from(!self.hi_res)]),

@@ -339,6 +339,9 @@ pub enum Setting {
     TouchLock(bool),
     PromptMode(u8),
     HiRes(bool),
+    /// Have the headphones connect to a paired device. The name is the one that was on
+    /// screen when it was asked for, so a list that has changed since is noticed.
+    Connect { index: u8, name: String },
 }
 
 impl Setting {
@@ -362,6 +365,7 @@ impl Setting {
             Setting::TouchLock(_) => 14,
             Setting::PromptMode(_) => 15,
             Setting::HiRes(_) => 16,
+            Setting::Connect { .. } => 17,
         }
     }
 
@@ -388,6 +392,7 @@ impl Setting {
             Setting::TouchLock(b) => format!("Touch lock {}", on(b)),
             Setting::PromptMode(v) => format!("Prompts {}", PROMPT_MODES.get(usize::from(*v)).unwrap_or(&"?")),
             Setting::HiRes(b) => format!("Hi-Res audio {}", on(b)),
+            Setting::Connect { name, .. } => format!("Connect {name}"),
         }
     }
 }
@@ -565,6 +570,30 @@ mod tests {
         assert_eq!(seen[2..], [Some(false), Some(false), Some(true), Some(true), Some(false)]);
         assert_eq!(d.codec.and_then(codec_name), Some("aptX HD"));
         assert_eq!(d.sample_rate, Some(44_100));
+    }
+
+    /// The same headphones as they were asked to connect to a paired TV (2026-11-26):
+    /// its entry before, the acknowledgment, the entry a moment later, and the
+    /// notification that followed.
+    #[test]
+    fn reads_what_real_headphones_sent_for_a_connect() {
+        let mut dec = crate::proto::Decoder::default();
+        let mut d = Device::default();
+        let mut seen = Vec::new();
+        for chunk in ["FF 03 00 06 04 95 15 01 01 00 00 54 56 00", "FF 03 00 00 04 95 15 02", "FF 03 00 06 04 95 15 01 01 00 01 54 56 00", "FF 03 00 02 04 95 14 84 01 01"] {
+            let bytes: Vec<u8> = chunk.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect();
+            dec.push(&bytes);
+            while let Some(f) = dec.next_frame() {
+                d.apply(None, &f);
+                seen.push(d.paired.first().map(|p| (p.index, p.connected, p.name.clone())));
+            }
+        }
+        let tv = |connected: bool| Some((1, connected, "TV".to_string()));
+        assert_eq!(seen, [tv(false), tv(false), tv(true), tv(true)]);
+        // The notification alone is enough to mark an entry connected.
+        d.paired[0].connected = false;
+        d.apply(None, &Frame::new(cmd::PAIRED_STATUS_GET | 0x0080, &[1, 1]));
+        assert!(d.paired[0].connected);
     }
 
     #[test]

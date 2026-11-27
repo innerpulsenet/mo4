@@ -188,6 +188,9 @@ pub mod cmd {
 
     pub const PAIRED_COUNT_GET: u16 = 0x1400;
     pub const PAIRED_INFO_GET: u16 = 0x1401;
+    /// `[index]`: have the headphones connect to that paired device. Its neighbors
+    /// 0x1403, 0x1405 and 0x1406 take a connection or a pairing away and are forbidden.
+    pub const PAIRED_CONNECT: u16 = 0x1402;
     pub const PAIRED_STATUS_GET: u16 = 0x1404;
     /// The paired-list index of the device that is asking.
     pub const OWN_INDEX_GET: u16 = 0x1407;
@@ -238,6 +241,14 @@ mod tests {
 
     fn unhex(s: &str) -> Vec<u8> {
         s.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect()
+    }
+
+    #[test]
+    fn allows_connecting_and_forbids_its_neighbors() {
+        assert!(!forbidden(VENDOR_SENNHEISER, cmd::PAIRED_CONNECT));
+        for taken_away in [0x1403, 0x1405, 0x1406] {
+            assert!(forbidden(VENDOR_SENNHEISER, taken_away));
+        }
     }
 
     #[test]

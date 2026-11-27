@@ -36,7 +36,9 @@ testing, which the titlebar labels as such.
 - **Anti-wind:** off, auto or max.
 - **Transparent hearing**, and pausing playback while it is on.
 - **Paired devices**, which of them is this computer, and how many may be connected
-  at once (read-only).
+  at once. A CONNECT key asks the headphones to connect to one that is not; it takes
+  a second press, and the headphones may move to that device's audio. MO4 never
+  disconnects or forgets a device.
 
 <br clear="right">
 
@@ -153,6 +155,7 @@ mo4 eq                      the equalizer curve
 mo4 eq 2 0 -1 1.5 3         set every band, in dB
 mo4 eq classic rock         apply a preset by name
 mo4 presets                 list presets
+mo4 connect <name>          have the headphones connect to a paired device
 mo4 watch                   print changes as the headphones report them
 mo4 help                    the settings and their values
 ```
@@ -171,8 +174,8 @@ surface. It also opens only the channels the headphones list for their control s
 sending control frames to other channels has been reported to switch the headset off.
 
 Not there yet: a tray icon, the equalizer of firmware older than 3.18, renaming the
-headphones, connecting a paired device from the app, sound personalization (left as the
-phone app set it), and screen reader support.
+headphones, sound personalization (left as the phone app set it), and screen reader
+support.
 
 ## Build
 

@@ -13,6 +13,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const SETTLE: Duration = Duration::from_millis(500);
 /// Between channels: hammering the wrong one can wedge the headphones' Bluetooth stack.
 const PACE: Duration = Duration::from_millis(300);
+/// How long a paired device gets to show up as connected after it was asked for.
+pub const CONNECT_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub enum Fault {
@@ -203,6 +205,42 @@ impl Client {
         self.read(cmd::HI_RES_GET, &[])
     }
 
+    /// Ask the headphones to connect to one of their paired devices, then watch that
+    /// entry until it reports connected or `wait` runs out. Nothing is sent unless the
+    /// entry is known, is not this computer, and still carries the name that was asked
+    /// for. Disconnecting and forgetting stay forbidden.
+    pub fn connect_paired(&mut self, index: u8, name: &str, wait: Duration) -> Result<bool, Fault> {
+        let Some(own) = self.dev.own_index else {
+            return Err(Fault::NotSent("the headphones did not say which paired device this computer is"));
+        };
+        if index == own {
+            return Err(Fault::NotSent("that is this computer"));
+        }
+        match self.dev.paired.iter().find(|d| d.index == index) {
+            None => return Err(Fault::NotSent("the headphones do not list that device")),
+            Some(d) if d.name != name => return Err(Fault::NotSent("the paired list has changed; read it again first")),
+            Some(d) if d.connected => return Err(Fault::NotSent("it is already connected")),
+            Some(_) => {}
+        }
+        self.write(cmd::PAIRED_CONNECT, &[index])?;
+        let connected = |c: &Client| c.dev.paired.iter().any(|d| d.index == index && d.connected);
+        let until = Instant::now() + wait;
+        loop {
+            self.read(cmd::PAIRED_INFO_GET, &[index])?;
+            if connected(self) || Instant::now() >= until {
+                break;
+            }
+            self.pump(Duration::from_millis(500)).map_err(Fault::Io)?;
+        }
+        // Another device may have been dropped to make room: read the whole list again.
+        self.read(cmd::PAIRED_COUNT_GET, &[])?;
+        for i in 0..self.dev.paired_count.unwrap_or(0).min(8) {
+            self.read(cmd::PAIRED_INFO_GET, &[i as u8])?;
+        }
+        self.read(cmd::OWN_INDEX_GET, &[])?;
+        Ok(connected(self))
+    }
+
     pub fn refresh_battery(&mut self) -> Result<(), Fault> {
         self.read(cmd::BATTERY_GET, &[])?;
         self.read(cmd::CHARGING_GET, &[])
@@ -377,6 +415,7 @@ impl Client {
                 self.read(cmd::CODEC_GET, &[])?;
                 Ok(self.dev.hi_res == Some(*on))
             }
+            Setting::Connect { index, name } => self.connect_paired(*index, name, CONNECT_WAIT),
         }
     }
 }
@@ -468,6 +507,36 @@ mod tests {
         c.read(cmd::HI_RES_GET, &[]).unwrap();
         assert_eq!(c.dev.hi_res, Some(false));
         assert!(c.set(&Setting::HiRes(false)).unwrap());
+    }
+
+    #[test]
+    fn connects_a_paired_device_and_reads_the_list_back() {
+        let mut c = sim();
+        let tablet = c.dev.paired[2].clone();
+        assert!(!tablet.connected);
+        assert!(c.connect_paired(tablet.index, &tablet.name, Duration::from_secs(2)).unwrap());
+        assert!(c.dev.paired[2].connected);
+        assert_eq!(c.dev.own_index, Some(0));
+        // This computer is still there.
+        assert!(c.dev.paired[0].connected);
+    }
+
+    #[test]
+    fn will_not_ask_for_a_connection_it_should_not() {
+        let mut c = sim();
+        let wait = Duration::from_secs(1);
+        let own = c.dev.paired[0].clone();
+        assert!(matches!(c.connect_paired(own.index, &own.name, wait), Err(Fault::NotSent(_))));
+        let phone = c.dev.paired[1].clone();
+        assert!(matches!(c.connect_paired(phone.index, &phone.name, wait), Err(Fault::NotSent(_))), "already connected");
+        assert!(matches!(c.connect_paired(2, "Some other name", wait), Err(Fault::NotSent(_))), "the list changed");
+        assert!(matches!(c.connect_paired(7, "Nothing", wait), Err(Fault::NotSent(_))), "not in the list");
+        c.dev.own_index = None;
+        let tablet = c.dev.paired[2].clone();
+        assert!(matches!(c.connect_paired(tablet.index, &tablet.name, wait), Err(Fault::NotSent(_))), "own entry unknown");
+        // None of that reached the simulator: a fresh read shows the list as it was.
+        c.refresh().unwrap();
+        assert!(!c.dev.paired[2].connected);
     }
 
     #[test]

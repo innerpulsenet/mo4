@@ -338,6 +338,7 @@ and leaves those command words alone on such firmware.
 | Serial | | `001D:0003` | text |
 | Paired devices | | `1400` | count (2 bytes) |
 | Paired device | | `1401 [index]` | `[index, priority, connected, name...]` |
+| Connect a paired device | `1402 [index]` | | Acknowledged with an empty `1502`; `1484 [index, 1]` follows once it is connected |
 | Connections allowed | | `1409` | `[n]` |
 | Own index | | `1407` | `[index]` of the paired device that is asking |
 
@@ -392,6 +393,16 @@ and leaves those command words alone on such firmware.
   cannot send aptX Adaptive, so what the switch does to a link that can use it has
   not been seen. MO4 will not switch Hi-Res on while the sound mode is 3 (sound
   personalization): the phone app never runs the two together.
+- **A paired device has been connected on real headphones** (2026-11-26): a TV, as
+  the second of two connections allowed. `1402 [1]` was acknowledged with an empty
+  `1502`. The entry read `01 00 00` twice more, then `01 00 01` about a second
+  later, and the notification `1484 01 01` arrived after that. The computer asking
+  stayed connected. The headphones then reported codec `00` at 48000 Hz while the
+  computer was sending nothing, so they had moved to the TV's audio. MO4 sends
+  `1402` only for an entry that is listed, is not connected, is not the computer
+  asking (`1407`), and still has the name that was on screen. A first attempt sent
+  nothing, because the TV had connected on its own and MO4 held the request back.
+  What the headphones do when they are already at their limit is not known.
 - **One other setting has been changed on real headphones by trace:** anti-wind,
   auto to max and back, with the single-pair form `1A00 [1, value]`. The headphones
   acknowledged with

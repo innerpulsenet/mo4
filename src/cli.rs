@@ -18,6 +18,7 @@ MO4: control for Sennheiser MOMENTUM 4 headphones
   mo4 eq <dB> <dB> ...        set every band, in dB (for example: mo4 eq 2 0 -1 1.5 3)
   mo4 eq <preset>             apply a preset by name (for example: mo4 eq classic rock)
   mo4 presets                 list presets
+  mo4 connect <name>          have the headphones connect to one of their paired devices
   mo4 watch                   print changes as the headphones report them
   mo4 usb-off                 switch the headphones off over the USB cable
   mo4 usb-probe [--seconds N]
@@ -249,6 +250,26 @@ pub fn run(args: &[String], target: &Target, trace: bool) -> Result<(), String> 
                 return Err(format!("sent, but the headphones report {key} = {now}"));
             }
             println!("{key} = {now}");
+        }
+        Some("connect") => {
+            let wanted = args[1..].join(" ");
+            if wanted.is_empty() {
+                return Err("which paired device? (mo4 status lists them)".into());
+            }
+            let mut c = connect(target, trace)?;
+            let matches: Vec<_> = c.dev.paired.iter().filter(|p| p.name.eq_ignore_ascii_case(&wanted)).cloned().collect();
+            let device = match matches.as_slice() {
+                [one] => one.clone(),
+                [] => {
+                    let names: Vec<_> = c.dev.paired.iter().map(|p| format!("\"{}\"", p.name)).collect();
+                    return Err(format!("no paired device is called \"{wanted}\". The headphones list: {}", names.join(", ")));
+                }
+                _ => return Err(format!("more than one paired device is called \"{wanted}\"")),
+            };
+            if !c.connect_paired(device.index, &device.name, crate::client::CONNECT_WAIT).map_err(|e| e.to_string())? {
+                return Err(format!("asked, but the headphones still report {} as not connected", device.name));
+            }
+            println!("{} is connected", device.name);
         }
         Some("eq") => {
             let mut c = connect(target, trace)?;
