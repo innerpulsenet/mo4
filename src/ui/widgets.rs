@@ -117,10 +117,18 @@ pub fn selector(ui: &Ui, rect: Rect, id: impl Hash + Copy + std::fmt::Debug, opt
 /// A named switch: the name at the left, a lamp key at the right. `None` means the
 /// headphones did not report the setting, and the switch says so instead of guessing.
 pub fn switch_row(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &str, hint: &str, value: Option<bool>, enabled: bool) -> Option<bool> {
+    switch_row_asking(ui, rect, id, label, hint, value, enabled, false)
+}
+
+/// A switch that wants a second press before it goes on: while `asking`, its key reads
+/// "REALLY?" in amber and `hint` should say what the second press does.
+#[allow(clippy::too_many_arguments)]
+pub fn switch_row_asking(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &str, hint: &str, value: Option<bool>, enabled: bool, asking: bool) -> Option<bool> {
     let p = painter(ui, enabled && value.is_some());
     p.text(rect.left_center(), Align2::LEFT_CENTER, label, sans(12.5), steel::TEXT);
     let k = Rect::from_min_max(pos2(rect.right() - 62.0, rect.center().y - 11.0), pos2(rect.right(), rect.center().y + 11.0));
     let (text, on) = match value {
+        _ if asking => ("REALLY?", true),
         Some(true) => ("ON", true),
         Some(false) => ("OFF", false),
         None => ("N/A", false),
@@ -128,7 +136,7 @@ pub fn switch_row(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &
     let usable = enabled && value.is_some();
     // The whole row takes the click, not only the key; the key alone is the tab stop.
     let row = ui.interact(rect, ui.id().with((&id, "row")), if usable { Sense::CLICK } else { Sense::hover() });
-    let resp = key(ui, k, &id, text, on, TINT, usable, value.is_some());
+    let resp = key(ui, k, &id, text, on, if asking { steel::AMBER } else { TINT }, usable, value.is_some() && !asking);
     let tip = if value.is_some() { hint } else { "The headphones did not report this setting" };
     let clicked = resp.clicked() || row.clicked();
     row.on_hover_text(tip);
@@ -425,6 +433,8 @@ pub struct EqView<'a> {
 pub struct EqEvent {
     pub curve: Option<Vec<i8>>,
     pub released: bool,
+    /// The band whose column the pointer is over.
+    pub hovered: Option<usize>,
 }
 
 /// The equalizer: a screen sunk into the plate with one node per band. Drag a node,
@@ -434,7 +444,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
     let p = ui.painter().clone();
     steel::well(&p, rect, Some(TINT));
     let n = view.shown.len();
-    let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()) };
+    let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()), hovered: None };
     if n == 0 {
         return event;
     }
@@ -513,6 +523,9 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         let col = Rect::from_min_max(pos2(plot.left() + plot.width() * band as f32 / n as f32, rect.top() + 4.0), pos2(plot.left() + plot.width() * (band + 1) as f32 / n as f32, rect.bottom() - 4.0));
         let resp = ui.interact(col, ui.id().with(("eq-band", band)), if view.enabled { Sense::click_and_drag() } else { Sense::hover() });
         let hot = resp.hovered() || resp.dragged();
+        if resp.hovered() {
+            event.hovered = Some(band);
+        }
         let name = view.labels.get(band).cloned().unwrap_or_default();
         resp.widget_info(|| egui::WidgetInfo::slider(view.enabled, f64::from(view.shown[band]) / 10.0, format!("Equalizer band {name} Hz, dB")));
         keep_arrows(ui, &resp, false, true);

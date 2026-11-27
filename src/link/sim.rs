@@ -30,6 +30,7 @@ pub struct SimLink {
     comfort_call: bool,
     touch_lock: bool,
     prompts: u8,
+    hi_res: bool,
 }
 
 const FREQS: [u16; 5] = [90, 325, 1500, 6500, 6500];
@@ -58,6 +59,7 @@ impl SimLink {
             comfort_call: true,
             touch_lock: false,
             prompts: 2,
+            hi_res: false,
         }
     }
 
@@ -116,12 +118,16 @@ impl SimLink {
                     self.registered.push(arg);
                 }
                 self.reply(f, &[]);
+                if arg == 4 {
+                    // Real headphones push the sample rate once generic audio is registered.
+                    self.notify(cmd::SAMPLE_RATE, &48_000u32.to_be_bytes());
+                }
             }
             cmd::MODEL_GET => self.reply(f, b"M4AEBT Simulated\0"),
             cmd::FIRMWARE_GET => self.reply(f, &[0, 3, 0, 38, 0, 3]),
             cmd::BATTERY_GET => self.reply(f, &[82]),
             cmd::CHARGING_GET => self.reply(f, &[0]),
-            cmd::CODEC_GET => self.reply(f, &[5]),
+            cmd::CODEC_GET => self.reply(f, &[11]),
             cmd::WEAR_STATE_GET => self.reply(f, &[3]),
             cmd::ON_HEAD_DETECTION_GET => self.reply(f, &[u8::from(self.on_head)]),
             cmd::ON_HEAD_DETECTION_SET => {
@@ -229,6 +235,13 @@ impl SimLink {
                 self.reply(f, &out);
             }
             cmd::MAX_CONNECTIONS_GET => self.reply(f, &[2]),
+            cmd::OWN_INDEX_GET => self.reply(f, &[0]),
+            // On the wire 0 is on and 1 is off.
+            cmd::HI_RES_GET => self.reply(f, &[u8::from(!self.hi_res)]),
+            cmd::HI_RES_SET if arg <= 1 && !p.is_empty() => {
+                self.hi_res = arg == 0;
+                self.reply(f, &[]);
+            }
             _ => self.reject(f, 1),
         }
     }

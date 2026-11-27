@@ -56,6 +56,10 @@ pub struct Device {
     /// 0 not charging, 1 charging, 2 charge complete.
     pub charging: Option<u8>,
     pub codec: Option<u8>,
+    /// Hz, as the headphones push it; 0 when nothing is playing.
+    pub sample_rate: Option<u32>,
+    /// Hi-Res audio (24-bit/96 kHz over aptX Adaptive).
+    pub hi_res: Option<bool>,
     /// 1 in case, 2 off head, 3 on head.
     pub wear: Option<u8>,
 
@@ -91,6 +95,8 @@ pub struct Device {
     pub paired_count: Option<u16>,
     pub paired: Vec<Paired>,
     pub max_connections: Option<u8>,
+    /// Which entry of `paired` is the device this app runs on.
+    pub own_index: Option<u8>,
 }
 
 fn text(p: &[u8]) -> Option<String> {
@@ -149,6 +155,14 @@ impl Device {
             cmd::BATTERY_GET => self.battery = p.first().copied().filter(|v| *v <= 100),
             cmd::CHARGING_GET => self.charging = p.first().copied(),
             cmd::CODEC_GET => self.codec = p.first().copied(),
+            cmd::SAMPLE_RATE if notification && p.len() >= 4 => self.sample_rate = Some(u32::from_be_bytes([p[0], p[1], p[2], p[3]])),
+            cmd::HI_RES_GET => {
+                self.hi_res = match p.first() {
+                    Some(0) => Some(true),
+                    Some(1) => Some(false),
+                    _ => None,
+                }
+            }
             cmd::WEAR_STATE_GET => self.wear = p.first().copied(),
             cmd::ON_HEAD_DETECTION_GET => self.on_head_detection = flag(p),
             cmd::ANC_GET => self.anc = flag(p),
@@ -231,6 +245,7 @@ impl Device {
                 }
             }
             cmd::MAX_CONNECTIONS_GET => self.max_connections = p.first().copied(),
+            cmd::OWN_INDEX_GET => self.own_index = p.first().copied(),
             _ => {}
         }
         *self != before
@@ -257,8 +272,20 @@ pub fn codec_name(code: u8) -> Option<&'static str> {
         8 => "aptX Adaptive",
         9 => "aptX Lossless",
         10 => "LC3",
+        // Not in any published table: what an M4AEBT SE on 3.38.3 reported while the
+        // computer was sending it aptX HD at 48 kHz. At 44.1 kHz it reported 5.
+        11 => "aptX HD",
         255 => "not streaming",
         _ => return None,
+    })
+}
+
+/// A sample rate in words: "48 kHz", "44.1 kHz". `None` for 0, which is what the
+/// headphones send when nothing is playing.
+pub fn sample_rate_text(hz: u32) -> Option<String> {
+    (hz > 0).then(|| {
+        let k = f64::from(hz) / 1000.0;
+        if (k - k.round()).abs() < 0.05 { format!("{k:.0} kHz") } else { format!("{k:.1} kHz") }
     })
 }
 
@@ -311,6 +338,7 @@ pub enum Setting {
     ComfortCall(bool),
     TouchLock(bool),
     PromptMode(u8),
+    HiRes(bool),
 }
 
 impl Setting {
@@ -333,6 +361,7 @@ impl Setting {
             Setting::ComfortCall(_) => 13,
             Setting::TouchLock(_) => 14,
             Setting::PromptMode(_) => 15,
+            Setting::HiRes(_) => 16,
         }
     }
 
@@ -358,6 +387,7 @@ impl Setting {
             Setting::ComfortCall(b) => format!("Comfort call {}", on(b)),
             Setting::TouchLock(b) => format!("Touch lock {}", on(b)),
             Setting::PromptMode(v) => format!("Prompts {}", PROMPT_MODES.get(usize::from(*v)).unwrap_or(&"?")),
+            Setting::HiRes(b) => format!("Hi-Res audio {}", on(b)),
         }
     }
 }
@@ -426,6 +456,27 @@ mod tests {
         assert_eq!(d.eq_freqs, vec![Some(90), Some(325), Some(1500), Some(6500), Some(6500)]);
     }
 
+    #[test]
+    fn reads_hi_res_sample_rate_and_own_index() {
+        let mut d = Device::default();
+        d.apply(None, &reply(cmd::HI_RES_GET, &[0]));
+        assert_eq!(d.hi_res, Some(true));
+        d.apply(None, &reply(cmd::HI_RES_GET, &[1]));
+        assert_eq!(d.hi_res, Some(false));
+        d.apply(None, &reply(cmd::HI_RES_GET, &[7]));
+        assert_eq!(d.hi_res, None);
+        d.apply(None, &Frame::new(cmd::SAMPLE_RATE | 0x0080, &[0, 0, 0xBB, 0x80]));
+        assert_eq!(d.sample_rate, Some(48_000));
+        assert_eq!(sample_rate_text(48_000).as_deref(), Some("48 kHz"));
+        assert_eq!(sample_rate_text(44_100).as_deref(), Some("44.1 kHz"));
+        assert_eq!(sample_rate_text(0), None);
+        // Too short to be a rate: left alone.
+        d.apply(None, &Frame::new(cmd::SAMPLE_RATE | 0x0080, &[0, 0]));
+        assert_eq!(d.sample_rate, Some(48_000));
+        d.apply(None, &reply(cmd::OWN_INDEX_GET, &[2]));
+        assert_eq!(d.own_index, Some(2));
+    }
+
     /// What an M4AEBT SE on firmware 3.38.3 pushed after registering for notifications,
     /// in the chunks it arrived in over Bluetooth (2026-11-26), followed by two replies.
     #[test]
@@ -458,6 +509,7 @@ mod tests {
         }
         assert_eq!(frames, 22);
         assert_eq!(d.codec, Some(255));
+        assert_eq!(d.sample_rate, Some(0));
         assert_eq!(d.sound_mode, Some(0));
         assert_eq!(d.transparent_hearing, Some(false));
         assert_eq!(d.noise_mode(), Some(NoiseMode::Custom));
@@ -467,6 +519,52 @@ mod tests {
         assert_eq!(d.bass_boost, Some(false));
         assert_eq!(d.eq_freqs, vec![Some(90), Some(325), Some(1500), Some(6500), Some(6500)]);
         assert_eq!(d.eq, Some(EqConfig { bands: 5, min: -60, max: 60 }));
+    }
+
+    /// Frames from the same headphones while music was playing (2026-11-26): the codec
+    /// and sample rate they pushed, then the replies to the own-index and Hi-Res reads.
+    #[test]
+    fn reads_what_real_headphones_sent_while_playing() {
+        let mut dec = crate::proto::Decoder::default();
+        let mut d = Device::default();
+        for chunk in ["FF 03 00 01 04 95 08 80 0B FF 03 00 04 04 95 08 9A 00 00 BB 80", "FF 03 00 01 04 95 15 07 00", "FF 03 00 01 04 95 05 06 01"] {
+            let bytes: Vec<u8> = chunk.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect();
+            dec.push(&bytes);
+            while let Some(f) = dec.next_frame() {
+                d.apply(None, &f);
+            }
+        }
+        assert_eq!(d.codec.and_then(codec_name), Some("aptX HD"));
+        assert_eq!(d.sample_rate, Some(48_000));
+        assert_eq!(d.own_index, Some(0));
+        assert_eq!(d.hi_res, Some(false));
+    }
+
+    /// The same headphones as Hi-Res was switched on and back off (2026-11-26): the
+    /// read before, then each acknowledgment and the read after it.
+    #[test]
+    fn reads_what_real_headphones_sent_for_hi_res() {
+        let mut dec = crate::proto::Decoder::default();
+        let mut d = Device::default();
+        let mut seen = Vec::new();
+        for chunk in [
+            "FF 03 00 01 04 95 08 80 05 FF 03 00 04 04 95 08 9A 00 00 AC 44",
+            "FF 03 00 01 04 95 05 06 01",
+            "FF 03 00 00 04 95 05 05",
+            "FF 03 00 01 04 95 05 06 00",
+            "FF 03 00 00 04 95 05 05",
+            "FF 03 00 01 04 95 05 06 01",
+        ] {
+            let bytes: Vec<u8> = chunk.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect();
+            dec.push(&bytes);
+            while let Some(f) = dec.next_frame() {
+                d.apply(None, &f);
+                seen.push(d.hi_res);
+            }
+        }
+        assert_eq!(seen[2..], [Some(false), Some(false), Some(true), Some(true), Some(false)]);
+        assert_eq!(d.codec.and_then(codec_name), Some("aptX HD"));
+        assert_eq!(d.sample_rate, Some(44_100));
     }
 
     #[test]

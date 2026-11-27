@@ -322,7 +322,9 @@ and leaves those command words alone on such firmware.
 | Battery | | `0603` | `[percent]`, 255 unknown |
 | Charging | | `0602` | 0 no, 1 charging, 2 full |
 | Auto power-off | `0600` | `0601 [0]` | `[0, seconds (2)]`: 0 never, 900, 1800, 3600 |
-| Codec in use | | `0800` | 0 SBC, 1 AAC, 2 aptX, 3 aptX LL, 4 MP3, 5 aptX HD, 6 FastStream, 7 LHDC, 8 aptX Adaptive, 9 aptX Lossless, 10 LC3, 255 none |
+| Codec in use | | `0800` | 0 SBC, 1 AAC, 2 aptX, 3 aptX LL, 4 MP3, 5 aptX HD, 6 FastStream, 7 LHDC, 8 aptX Adaptive, 9 aptX Lossless, 10 LC3, 255 none. On 3.38.3, 11 while receiving aptX HD at 48 kHz (see "What is verified") |
+| Sample rate | | notification `089A` only | Hz (4 bytes); 0 when nothing is playing. Pushed after registering feature 4 and never asked for |
+| Hi-Res audio | `0405` | `0406` | `[0]` Hi-Res on, `[1]` off: the phone app treats it as a compatibility mode, so off is the 1 |
 | Prompts | `0801` | `0802` | 0 off, 1 tones, 2 tones and voice |
 | Sidetone | `0805` | `0806` | `[0..4]`; 5 is refused on 3.38.3 |
 | Auto answer | `080A` | `080B` | `[0/1]` |
@@ -337,6 +339,7 @@ and leaves those command words alone on such firmware.
 | Paired devices | | `1400` | count (2 bytes) |
 | Paired device | | `1401 [index]` | `[index, priority, connected, name...]` |
 | Connections allowed | | `1409` | `[n]` |
+| Own index | | `1407` | `[index]` of the paired device that is asking |
 
 ## Commands MO4 refuses to send
 
@@ -362,12 +365,36 @@ and leaves those command words alone on such firmware.
   settings, touch lock, prompts, the auto power-off timer and the paired devices.
   Registering for notifications pushed the current values as described. Those frames
   are now a test (`reads_what_real_headphones_sent`).
-- Seen in that session and not used: notifications `089A` (four zero bytes, read
-  elsewhere as the sample rate), `0898`, `1091`, `108D` and `108F` (per-band values,
+- Seen in that session: notification `089A` as four zero bytes (the sample rate, see
+  below). Seen and not used: `0898`, `1091`, `108D` and `108F` (per-band values,
   read elsewhere as gain, Q and filter type) and `1093` (two zero bytes). The charging
   reply was two bytes, `00 00`; MO4 reads the first.
-- **One setting has been changed on real headphones:** anti-wind, auto to max and
-  back, with the single-pair form `1A00 [1, value]`. The headphones acknowledged with
+- **Three more reads, same headphones, while music was playing** (2026-11-26). They
+  come from a reading of the phone app (Smart Control Plus 1.6.3), not from the
+  projects above, and all three answered as that reading said:
+  - `1407` replied `00`, and entry 0 of the paired list was the computer asking.
+  - `0406` replied `01`, Hi-Res off.
+  - `089A` arrived as `00 00 BB 80`, 48000 Hz, where the first session, with nothing
+    playing, had four zero bytes. The computer's sound server was sending 48 kHz.
+- **The codec byte was `0B` (11) in that session**, both pushed as `0880` and read with
+  `0800`, while the computer's sound server said it was sending aptX HD and the
+  sample rate was 48000. No source lists 11. In a later session the same day the
+  sound server was sending aptX HD at 44.1 kHz, and the headphones reported codec
+  `05`, the sources' number for aptX HD, with `089A` as `00 00 AC 44`. So both 5 and
+  11 have been seen with aptX HD, 5 at 44.1 kHz and 11 at 48 kHz, once each. MO4
+  names both aptX HD; why there are two numbers is not known, and the other numbers
+  in the table are unconfirmed here.
+- **Hi-Res has been switched on and off on real headphones** (2026-11-26, music
+  playing, sound mode 0). `0405 [0]` was acknowledged with an empty `0505` and `0406`
+  then read `00`; a new connection still read `00`. `0405 [1]` was acknowledged the
+  same way and `0406` read `01` again. No notification followed either write. The
+  codec stayed `05` and the computer's audio output kept running: this computer
+  cannot send aptX Adaptive, so what the switch does to a link that can use it has
+  not been seen. MO4 will not switch Hi-Res on while the sound mode is 3 (sound
+  personalization): the phone app never runs the two together.
+- **One other setting has been changed on real headphones by trace:** anti-wind,
+  auto to max and back, with the single-pair form `1A00 [1, value]`. The headphones
+  acknowledged with
   an empty `1B00`, pushed `1A81` with the new table, and the read-back agreed; the
   mode and level were untouched. Every other setter is tested against the simulated
   headset only.

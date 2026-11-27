@@ -51,9 +51,11 @@ struct App {
     /// When the headphones last came online: the instruments come alive from here.
     online_since: Option<Instant>,
     /// How to work the instrument under the pointer, shown in the foot of the window.
-    hint: Option<&'static str>,
+    hint: Option<String>,
     /// When DELETE was first pressed: a second press within a few seconds removes the preset.
     delete_asked: Option<Instant>,
+    /// When the Hi-Res switch was first pressed; it goes on at the second press.
+    hi_res_asked: Option<Instant>,
     /// The same for SWITCH OFF on the USB card.
     off_asked: Option<Instant>,
     shot: Option<Shot>,
@@ -70,8 +72,8 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
     let viewport = egui::ViewportBuilder::default()
         .with_title("MO4")
         .with_app_id("mo4")
-        .with_inner_size([1240.0, 780.0])
-        .with_min_inner_size([1140.0, 760.0])
+        .with_inner_size([1240.0, 800.0])
+        .with_min_inner_size([1140.0, 790.0])
         .with_icon(egui::IconData { rgba: include_bytes!("../../assets/icon-256.rgba").to_vec(), width: 256, height: 256 })
         .with_decorations(false);
     let options = eframe::NativeOptions { viewport, ..Default::default() };
@@ -100,6 +102,7 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
                 online_since: None,
                 hint: None,
                 delete_asked: None,
+                hi_res_asked: None,
                 off_asked: None,
                 shot: shot.map(|(path, delay)| Shot { path, frames: 0, requested: false, started: Instant::now(), delay }),
             }))
@@ -188,6 +191,19 @@ impl eframe::App for App {
         steel::resize_edges(&ctx);
         steel::outline(&ctx);
         self.take_shot(&ctx, online);
+    }
+}
+
+/// How long the Hi-Res switch waits for its second press; the footer line that
+/// explains it lasts as long.
+const HI_RES_ASK: Duration = Duration::from_secs(6);
+
+/// A frequency in words: "325 Hz", "6.5 kHz".
+fn hz_words(hz: u16) -> String {
+    let label = hz_label(hz);
+    match label.strip_suffix('k') {
+        Some(k) => format!("{k} kHz"),
+        None => format!("{label} Hz"),
     }
 }
 
@@ -313,7 +329,7 @@ impl App {
             self.drag(Setting::NoiseLevel(v), ev.released);
         }
         if turnable && ui.rect_contains_pointer(dial) {
-            self.hint = Some("Drag the dial, scroll, or use the arrow keys. Double-click for neutral.");
+            self.hint = Some("Drag the dial, scroll, or use the arrow keys. Double-click for neutral.".into());
         }
         // The two ends of the dial, named under them.
         let ends = widgets::painter(ui, turnable);
@@ -379,7 +395,9 @@ impl App {
                 let name = if dev.name.is_empty() { "unnamed device" } else { dev.name.as_str() };
                 let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 84.0, cy + 10.0)));
                 clip.text(pos2(inner.left() + 16.0, cy), Align2::LEFT_CENTER, name, sans(12.0), if dev.connected { steel::TEXT } else { steel::TEXT_3 });
-                if dev.connected {
+                if d.own_index == Some(dev.index) {
+                    p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "THIS COMPUTER", mono_bold(9.5), steel::TEXT_2);
+                } else if dev.connected {
                     p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTED", mono_bold(9.5), steel::TEXT_3);
                 }
             }
@@ -484,7 +502,17 @@ impl App {
             self.drag(Setting::EqGains(curve), ev.released);
         }
         if usable && ui.rect_contains_pointer(graph) {
-            self.hint = Some("Drag a node, scroll over a band, or use the arrow keys. Hold Shift for tenths of a dB. Double-click a node to zero it.");
+            // Two bands with one frequency look like a mistake, so say whose number it is.
+            let twin = ev.hovered.and_then(|band| {
+                let hz = |i: usize| d.eq_freqs.get(i).copied().flatten();
+                let here = hz(band)?;
+                let beside = (band > 0 && hz(band - 1) == Some(here)) || hz(band + 1) == Some(here);
+                beside.then_some(here)
+            });
+            self.hint = Some(match twin {
+                Some(hz) => format!("The headphones report {} for this band and for the one next to it. Each has its own gain: drag, scroll or use the arrow keys.", hz_words(hz)),
+                None => "Drag a node, scroll over a band, or use the arrow keys. Hold Shift for tenths of a dB. Double-click a node to zero it.".into(),
+            });
         }
 
         // Keys under the screen.
@@ -563,6 +591,11 @@ impl App {
         let lcd = Rect::from_min_max(inner.min, pos2(inner.right(), inner.top() + 82.0));
         widgets::battery_lcd(&p, lcd, d.battery, d.charging);
         let codec = d.codec.map(|c| device::codec_name(c).map_or_else(|| format!("unknown ({c})"), str::to_string));
+        // The rate belongs to the codec, and is only there while something plays.
+        let codec = match (codec, d.sample_rate.and_then(device::sample_rate_text)) {
+            (Some(codec), Some(rate)) => Some(format!("{codec}, {rate}")),
+            (codec, _) => codec,
+        };
         let wear = d.wear.map(|w| device::wear_name(w).map_or_else(|| format!("unknown ({w})"), str::to_string));
         let firmware = d.firmware_text();
         let via = match &self.snap.link {
@@ -624,6 +657,25 @@ impl App {
         if let Some(v) = widgets::switch_row(ui, row(y), "touch-lock", "Touch lock", "Ignore taps and swipes on the ear cup", v, online) {
             self.send(Setting::TouchLock(v));
         }
+        y += 28.0;
+        let v = held!(self, HiRes).or(d.hi_res);
+        let asking = v == Some(false) && self.hi_res_asked.is_some_and(|at| at.elapsed() < HI_RES_ASK);
+        if !asking {
+            self.hi_res_asked = None;
+        }
+        let tip = if asking { "Press again to switch Hi-Res on. Playback may be interrupted" } else { "Accept 24-bit/96 kHz audio over aptX Adaptive. Off is the steadier link" };
+        if let Some(want) = widgets::switch_row_asking(ui, row(y), "hi-res", "Hi-Res audio", tip, v, online, asking) {
+            if want && !asking {
+                // Going on changes what the audio link carries, so it takes two presses.
+                self.hi_res_asked = Some(Instant::now());
+                self.note("Hi-Res changes the audio link and may interrupt playback. Press again to switch it on.", Tone::Info);
+                ui.ctx().request_repaint_after(HI_RES_ASK);
+            } else {
+                self.hi_res_asked = None;
+                self.notice = None;
+                self.send(Setting::HiRes(want));
+            }
+        }
         y += 28.0 + 8.0;
 
         widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), "auto power-off, minutes");
@@ -669,7 +721,7 @@ impl App {
         if fresh {
             ui.ctx().request_repaint_after(Duration::from_secs(1));
         }
-        if let (Some(hint), None, false) = (self.hint, &self.notice, fresh) {
+        if let (Some(hint), None, false) = (self.hint.as_deref(), &self.notice, fresh) {
             p.with_clip_rect(area).text(pos2(foot.left() + 16.0, cy), Align2::LEFT_CENTER, hint, sans(12.0), steel::TEXT_2);
             self.foot_mark(ui, foot);
             return;

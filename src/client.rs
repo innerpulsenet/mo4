@@ -19,6 +19,8 @@ pub enum Fault {
     /// The headphones answered with an error code.
     Rejected(u8),
     Timeout,
+    /// This app held the request back; nothing went to the headphones.
+    NotSent(&'static str),
     /// The link is gone.
     Io(io::Error),
 }
@@ -28,6 +30,7 @@ impl std::fmt::Display for Fault {
         match self {
             Fault::Rejected(code) => write!(f, "the headphones refused it (code {code})"),
             Fault::Timeout => write!(f, "no answer from the headphones"),
+            Fault::NotSent(why) => write!(f, "not sent: {why}"),
             Fault::Io(e) => write!(f, "connection lost ({e})"),
         }
     }
@@ -196,7 +199,8 @@ impl Client {
         for index in 0..self.dev.paired_count.unwrap_or(0).min(8) {
             self.read(cmd::PAIRED_INFO_GET, &[index as u8])?;
         }
-        Ok(())
+        self.read(cmd::OWN_INDEX_GET, &[])?;
+        self.read(cmd::HI_RES_GET, &[])
     }
 
     pub fn refresh_battery(&mut self) -> Result<(), Fault> {
@@ -361,6 +365,18 @@ impl Client {
                 self.read(cmd::PROMPT_MODE_GET, &[])?;
                 Ok(self.dev.prompt_mode == Some(v))
             }
+            Setting::HiRes(on) => {
+                // The phone app never has both on, and switches personalization off
+                // itself first. That is its flow to run, not this app's.
+                if *on && self.dev.sound_mode == Some(3) {
+                    return Err(Fault::NotSent("sound personalization is on, and the two are not used together. Turn it off in the phone app first"));
+                }
+                self.write(cmd::HI_RES_SET, &[u8::from(!*on)])?;
+                self.read(cmd::HI_RES_GET, &[])?;
+                // It changes what the audio link may carry, so the codec can move too.
+                self.read(cmd::CODEC_GET, &[])?;
+                Ok(self.dev.hi_res == Some(*on))
+            }
         }
     }
 }
@@ -390,6 +406,9 @@ mod tests {
         assert_eq!(d.paired.len(), 3);
         assert!(d.paired[0].connected && !d.paired[2].connected);
         assert!(d.eq_supported());
+        assert_eq!(d.hi_res, Some(false));
+        assert_eq!(d.sample_rate, Some(48_000));
+        assert_eq!(d.own_index, Some(0));
     }
 
     #[test]
@@ -423,6 +442,32 @@ mod tests {
         assert!(c.set(&Setting::Sidetone(9)).unwrap());
         assert_eq!(c.dev.sidetone, Some(4));
         assert!(matches!(c.request(Frame::new(cmd::SIDETONE_SET, &[5])), Err(Fault::Rejected(5))));
+    }
+
+    #[test]
+    fn switches_hi_res_and_reads_it_back() {
+        let mut c = sim();
+        assert_eq!(c.dev.hi_res, Some(false));
+        assert!(c.set(&Setting::HiRes(true)).unwrap());
+        assert_eq!(c.dev.hi_res, Some(true));
+        // A fresh read agrees: the simulator stored it, the client did not assume it.
+        c.dev.hi_res = None;
+        c.refresh().unwrap();
+        assert_eq!(c.dev.hi_res, Some(true));
+        assert!(c.set(&Setting::HiRes(false)).unwrap());
+        assert_eq!(c.dev.hi_res, Some(false));
+    }
+
+    #[test]
+    fn holds_hi_res_back_while_sound_is_personalized() {
+        let mut c = sim();
+        c.dev.sound_mode = Some(3);
+        assert!(matches!(c.set(&Setting::HiRes(true)), Err(Fault::NotSent(_))));
+        // Nothing was sent, so nothing changed; switching it off is always allowed.
+        c.dev.sound_mode = Some(3);
+        c.read(cmd::HI_RES_GET, &[]).unwrap();
+        assert_eq!(c.dev.hi_res, Some(false));
+        assert!(c.set(&Setting::HiRes(false)).unwrap());
     }
 
     #[test]

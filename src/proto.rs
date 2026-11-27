@@ -147,6 +147,10 @@ pub mod cmd {
     pub const ON_HEAD_DETECTION_SET: u16 = 0x0400;
     pub const ON_HEAD_DETECTION_GET: u16 = 0x0401;
     pub const WEAR_STATE_GET: u16 = 0x0402;
+    /// One byte: 0 is Hi-Res audio on, 1 off. The phone app calls it a Bluetooth
+    /// compatibility mode, which is why off is the 1.
+    pub const HI_RES_SET: u16 = 0x0405;
+    pub const HI_RES_GET: u16 = 0x0406;
 
     pub const TIMER_SET: u16 = 0x0600;
     pub const TIMER_GET: u16 = 0x0601;
@@ -166,6 +170,9 @@ pub mod cmd {
     pub const SMART_PAUSE_GET: u16 = 0x080D;
     pub const COMFORT_CALL_SET: u16 = 0x0814;
     pub const COMFORT_CALL_GET: u16 = 0x0815;
+    /// Only ever seen as a notification (0x089A): the sample rate in Hz, 0 when nothing
+    /// is playing. Never sent as a request.
+    pub const SAMPLE_RATE: u16 = 0x081A;
 
     pub const EQ_CONFIG_GET: u16 = 0x1000;
     pub const EQ_BAND_SET: u16 = 0x1001;
@@ -182,6 +189,8 @@ pub mod cmd {
     pub const PAIRED_COUNT_GET: u16 = 0x1400;
     pub const PAIRED_INFO_GET: u16 = 0x1401;
     pub const PAIRED_STATUS_GET: u16 = 0x1404;
+    /// The paired-list index of the device that is asking.
+    pub const OWN_INDEX_GET: u16 = 0x1407;
     pub const MAX_CONNECTIONS_GET: u16 = 0x1409;
 
     pub const TOUCH_LOCK_SET: u16 = 0x1606;

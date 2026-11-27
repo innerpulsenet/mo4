@@ -42,6 +42,8 @@ Settings:
   comfort-call          on | off
   touch-lock            on | off
   prompts               off | tones | voice
+  hi-res                on | off (24-bit/96 kHz over aptX Adaptive; changing it may
+                        interrupt playback)
 
 Options:
   --addr AA:BB:CC:DD:EE:FF   use this Bluetooth address instead of searching
@@ -51,7 +53,7 @@ Options:
   --version                  print the version and the commit it was built from
 ";
 
-const KEYS: [&str; 15] = [
+const KEYS: [&str; 16] = [
     "mode",
     "level",
     "anti-wind",
@@ -67,6 +69,7 @@ const KEYS: [&str; 15] = [
     "comfort-call",
     "touch-lock",
     "prompts",
+    "hi-res",
 ];
 
 fn on_off(v: Option<bool>) -> Option<String> {
@@ -99,6 +102,7 @@ fn value(d: &Device, key: &str) -> Option<String> {
         "comfort-call" => on_off(d.comfort_call),
         "touch-lock" => on_off(d.touch_lock),
         "prompts" => named(&PROMPT_MODES, d.prompt_mode),
+        "hi-res" => on_off(d.hi_res),
         _ => None,
     }
 }
@@ -142,6 +146,7 @@ pub fn parse_setting(key: &str, v: &str) -> Result<Setting, String> {
         "comfort-call" => Setting::ComfortCall(parse_switch(v)?),
         "touch-lock" => Setting::TouchLock(parse_switch(v)?),
         "prompts" => Setting::PromptMode(parse_choice(&PROMPT_MODES, v)?),
+        "hi-res" => Setting::HiRes(parse_switch(v)?),
         _ => return Err(format!("unknown setting \"{key}\" (see mo4 help)")),
     })
 }
@@ -198,6 +203,7 @@ fn print_status(d: &Device, via: &str) {
     row("battery", d.battery.map(|b| format!("{b}%")));
     row("charging", named(&["no", "yes", "full"], d.charging));
     row("codec", d.codec.map(|c| device::codec_name(c).map_or_else(|| format!("unknown ({c})"), str::to_string)));
+    row("sample rate", d.sample_rate.map(|hz| device::sample_rate_text(hz).unwrap_or_else(|| "none (nothing playing)".into())));
     row("wearing", d.wear.map(|w| device::wear_name(w).map_or_else(|| format!("unknown ({w})"), str::to_string)));
     for key in KEYS {
         row(key, value(d, key));
@@ -206,7 +212,8 @@ fn print_status(d: &Device, via: &str) {
     if !d.paired.is_empty() {
         println!("paired devices");
         for p in &d.paired {
-            println!("  {} {}", if p.connected { "connected   " } else { "not connected" }, p.name);
+            let own = if d.own_index == Some(p.index) { " (this computer)" } else { "" };
+            println!("  {} {}{own}", if p.connected { "connected   " } else { "not connected" }, p.name);
         }
     }
 }

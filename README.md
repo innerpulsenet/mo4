@@ -35,7 +35,8 @@ testing, which the titlebar labels as such.
   transparency. Drag it, scroll, or use the arrow keys; double-click for neutral.
 - **Anti-wind:** off, auto or max.
 - **Transparent hearing**, and pausing playback while it is on.
-- **Paired devices** and how many may be connected at once (read-only).
+- **Paired devices**, which of them is this computer, and how many may be connected
+  at once (read-only).
 
 <br clear="right">
 
@@ -57,8 +58,11 @@ The headphones' own five-band equalizer, edited on a graph.
 
 - On-head detection, smart pause, auto answer, comfort call, touch lock, auto
   power-off, voice prompts and sidetone.
-- Battery and charging, model, firmware, serial number, the codec in use and whether
-  the headphones are being worn.
+- Hi-Res audio (24-bit/96 kHz over aptX Adaptive), which takes a second press to
+  switch on because it changes what the audio link may carry. It only makes a
+  difference when the computer or phone can send aptX Adaptive.
+- Battery and charging, model, firmware, serial number, the codec in use with its
+  sample rate, and whether the headphones are being worn.
 
 ### Nothing is guessed
 
@@ -79,7 +83,8 @@ the reduced-motion setting of KDE and of Windows.
 ## Presets
 
 Gains are in dB for the five bands, lowest first. The headphones report those bands at
-90 Hz, 325 Hz, 1.5 kHz, 6.5 kHz and 6.5 kHz.
+90 Hz, 325 Hz, 1.5 kHz, 6.5 kHz and 6.5 kHz. The last two really are reported the same;
+each still has its own gain, and the window says so when you point at them.
 
 | Group | Preset | Curve | For |
 |---|---|---|---|
