@@ -76,6 +76,15 @@ macro_rules! held {
     };
 }
 
+/// Dress egui's stock widgets (tooltips, the name field, scroll bars) for the plate in
+/// use. Called at the start and again whenever the plate is changed.
+fn dress(ctx: &egui::Context) {
+    steel::install(ctx, TINT);
+    if reduced_motion() {
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    }
+}
+
 pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>, plate: Option<look::Ground>) -> Result<(), String> {
     look::set(plate.or_else(|| store::load_look().as_deref().and_then(look::Ground::parse)).unwrap_or(look::Ground::Steel));
     let viewport = egui::ViewportBuilder::default()
@@ -91,10 +100,7 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>, plate:
         options,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
-            steel::install(&cc.egui_ctx, TINT);
-            if reduced_motion() {
-                cc.egui_ctx.all_styles_mut(|style| style.animation_time = 0.0);
-            }
+            dress(&cc.egui_ctx);
             let ctx = cc.egui_ctx.clone();
             let session = Session::start(target, trace, Box::new(move || ctx.request_repaint()));
             Ok(Box::new(App {
@@ -293,6 +299,7 @@ impl App {
         let to = look::ground().other();
         if widgets::ground_key(ui, plate_key).on_hover_text(if to == look::Ground::Aluminum { "Change the plate to bare aluminum" } else { "Change the plate to brushed steel" }).clicked() {
             look::set(to);
+            dress(ui.ctx());
             if self.keep_look
                 && let Err(e) = store::save_look(to.name())
             {
@@ -529,8 +536,7 @@ impl App {
 
         // Presets: kept in this app, applied by sending their curve.
         look::well(&p, list, None);
-        // The list is a dark screen on either plate, and so is what is written in it.
-        let in_screen = look::on_dark();
+        // The list is a well: pale on aluminum, and what is in it is written, not lit.
         let mut apply: Option<Vec<i8>> = None;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list.shrink2(vec2(1.0, 3.0))).id_salt("presets"));
         child.set_clip_rect(list.shrink(1.0));
@@ -558,18 +564,18 @@ impl App {
                 let rp = widgets::painter(ui, usable);
                 let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered() && usable);
                 if active || hover > 0.0 {
-                    rp.rect_filled(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), steel::alpha(if active { TINT } else { steel::TEXT }, if active { 0.14 } else { 0.05 * hover }));
+                    rp.rect_filled(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), steel::alpha(if active { look::written(TINT) } else { look::text() }, if active { 0.16 } else { 0.05 * hover }));
                 }
                 if active {
-                    rp.rect_filled(Rect::from_min_size(row.min + vec2(2.0, 5.0), vec2(2.0, row.height() - 10.0)), CornerRadius::same(1), TINT);
+                    rp.rect_filled(Rect::from_min_size(row.min + vec2(2.0, 5.0), vec2(2.0, row.height() - 10.0)), CornerRadius::same(1), look::written(TINT));
                 }
                 let text_clip = rp.with_clip_rect(Rect::from_min_max(row.min, pos2(row.right() - 46.0, row.bottom())).intersect(rp.clip_rect()));
-                text_clip.text(row.min + vec2(11.0, 0.5), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
-                text_clip.text(row.min + vec2(11.0, 14.0), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
-                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 7.0), pos2(row.right() - 9.0, row.bottom() - 7.0)), &preset.gains, known, if active { TINT } else { steel::TEXT_3 });
+                text_clip.text(row.min + vec2(11.0, 0.5), Align2::LEFT_TOP, &preset.name, semi(12.5), look::text());
+                text_clip.text(row.min + vec2(11.0, 14.0), Align2::LEFT_TOP, &preset.note, sans(11.0), look::text_3());
+                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 7.0), pos2(row.right() - 9.0, row.bottom() - 7.0)), &preset.gains, known, if active { look::written(TINT) } else { look::text_3() });
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, usable, active, format!("Preset {}", preset.name)));
                 if resp.has_focus() {
-                    rp.rect_stroke(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), Stroke::new(1.0, steel::EMBER), StrokeKind::Inside);
+                    rp.rect_stroke(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), Stroke::new(1.0, look::focus()), StrokeKind::Inside);
                 }
                 if resp.clicked() {
                     apply = Some(preset.gains.clone());
@@ -579,10 +585,9 @@ impl App {
                 // Nothing of the user's own yet: say how to get one here.
                 heading(ui, store::YOURS);
                 let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
-                ui.painter().text(r.min + vec2(11.0, 2.0), Align2::LEFT_TOP, "SAVE AS keeps a curve here.", sans(11.0), steel::TEXT_3);
+                ui.painter().text(r.min + vec2(11.0, 2.0), Align2::LEFT_TOP, "SAVE AS keeps a curve here.", sans(11.0), look::text_3());
             }
         });
-        drop(in_screen);
         if let Some(gains) = apply {
             self.send(Setting::EqGains(gains));
         }

@@ -189,7 +189,7 @@ pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, reading: Opti
             out = Some(v);
             keyed = true;
         }
-        p.rect_stroke(rect.expand2(vec2(0.0, 1.0)), CornerRadius::same(steel::RADIUS), Stroke::new(1.0, steel::EMBER), StrokeKind::Outside);
+        p.rect_stroke(rect.expand2(vec2(0.0, 1.0)), CornerRadius::same(steel::RADIUS), Stroke::new(1.0, look::focus()), StrokeKind::Outside);
     }
     (out, resp.drag_stopped() || resp.clicked() || keyed)
 }
@@ -307,7 +307,7 @@ pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_wo
         p.line_segment([polar(c, cap - 8.0, a), polar(c, cap - 0.5, a)], Stroke::new(2.5, steel::TEXT));
     }
     if resp.has_focus() {
-        p.circle_stroke(c, outer + 1.5, Stroke::new(1.0, steel::EMBER));
+        p.circle_stroke(c, outer + 1.5, Stroke::new(1.0, look::focus()));
     }
 
     // The figure on the cap. Without a level the dial stays dark and says why.
@@ -480,7 +480,7 @@ const TICKS: [u16; 8] = [50, 100, 200, 500, 1000, 2000, 5000, 10000];
 /// part ways wherever a band gives less than is set or its neighbors add to it.
 pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize>) -> EqEvent {
     let p = ui.painter().clone();
-    look::well(&p, rect, Some(TINT));
+    look::screen(&p, rect, Some(TINT));
     let n = view.shown.len();
     let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()), hovered: None, about: None };
     if n == 0 {
@@ -773,7 +773,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
 /// The battery readout: a dark screen with an amber figure and a row of cells. With no
 /// reading it stays dark and says so.
 pub fn battery_lcd(p: &Painter, rect: Rect, battery: Option<u8>, charging: Option<u8>) {
-    look::well(p, rect, Some(steel::AMBER));
+    look::screen(p, rect, Some(steel::AMBER));
     p.text(rect.min + vec2(12.0, 10.0), Align2::LEFT_TOP, "BATTERY", mono_bold(8.5), steel::alpha(steel::AMBER, 0.75));
     let cells = Rect::from_min_max(pos2(rect.left() + 12.0, rect.bottom() - 17.0), pos2(rect.right() - 12.0, rect.bottom() - 10.0));
     let count = 20;

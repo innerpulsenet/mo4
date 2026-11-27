@@ -81,8 +81,10 @@ sound.
 
 The window is one plate of brushed metal with dark screens let into it, and it comes in
 brushed steel or bare aluminum. The key with the two-tone disc in the titlebar changes
-the plate, and MO4 remembers the choice. Screens, lamps and lit keys are the same on
-both: only the metal changes, and what is written on it.
+the plate, and MO4 remembers the choice. The graph, the battery readout, lamps and lit
+keys are the same on both. What changes is the metal, what is written on it, and the
+places where something is read or typed: on aluminum the preset list and the field for
+a preset's name are pale and written in ink.
 
 ### Nothing is guessed
 
