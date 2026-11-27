@@ -21,34 +21,63 @@ pub const YOURS: &str = "yours";
 /// Curves for the five-band equalizer, written for this app: group, name, note, and
 /// the gain of each band in tenths of a dB, lowest band first.
 ///
-/// The music curves are starting points by ear, not measurements. They assume what
-/// reviews agree on about these headphones, a bass-forward stock tuning, so they add
-/// less bass than a curve for a neutral headphone would, and they stay inside the
-/// headphones' range of 6 dB either way.
-const BUILTIN: [(&str, &str, &str, [i8; 5]); 13] = [
+/// What is known about the bands is what the headphones report: 90 Hz, 325 Hz, 1.5 kHz
+/// and 6.5 kHz twice, the first one wide (Q 0.5), the rest two octaves or so (Q 0.71).
+/// What kind of filter each one is has not been measured, and nobody has published it.
+/// The last two may be the same bell twice, or a bell and a shelf. So every curve here
+/// keeps those two within half a dB of each other and their sum inside 6 dB: worked out
+/// for bells throughout, for a shelf on top, and for a shelf at both ends, each curve
+/// keeps its shape, and no point of it moves by more than about 2 dB between the three.
+///
+/// These are starting points by ear and by reasoning, not measurements. They assume
+/// what reviews agree on about these headphones, a bass-forward stock tuning, so they
+/// add less bass than a curve for a neutral headphone would.
+const BUILTIN: [(&str, &str, &str, [i8; 5]); 17] = [
     ("tone", "Flat", "no change", [0, 0, 0, 0, 0]),
-    ("tone", "Warm", "fuller lows, soft top", [30, 15, 0, -10, -20]),
-    ("tone", "Bass", "low-end weight", [50, 25, 0, 0, 0]),
-    ("tone", "Vocal", "voices forward", [-20, 0, 30, 20, 0]),
-    ("tone", "Bright", "air and detail", [0, 0, 0, 25, 40]),
-    ("tone", "Loudness", "gentle V shape", [40, 10, -10, 15, 35]),
-    ("tone", "Night", "easy on the ears", [-30, 0, 15, 20, -10]),
+    ("tone", "Warm", "fuller lows, soft top", [30, 15, 0, -15, -15]),
+    // The wide 90 Hz band already reaches the low mids; only a little is added at 325.
+    ("tone", "Bass", "low-end weight", [50, 10, 0, 0, 0]),
+    ("tone", "Vocal", "voices forward", [-20, 0, 30, 10, 10]),
+    ("tone", "Bright", "more treble detail", [0, 0, 0, 20, 20]),
+    ("tone", "Loudness", "gentle V shape", [40, 10, -10, 25, 25]),
+    ("tone", "Night", "less bass, clear voices", [-30, 0, 15, 5, 5]),
     // Layered, reverb-heavy and quiet-to-loud: depth for pads and sub-bass, the low
-    // mids thinned so the wash stays clear, soft vocals left alone, air on top.
-    ("music", "Post-rock", "dream pop, ambient", [15, -15, 0, 10, 25]),
+    // mids thinned so the wash stays clear, soft vocals left alone, a lifted top.
+    ("music", "Post-rock", "dream pop, ambient", [15, -15, 0, 15, 15]),
     // Sub-bass carries the track and the voice has to stay in front of it: weight at
     // the bottom, mud out, a little presence for consonants and hi-hats.
     ("music", "Rap", "deep sub, clear voice", [35, -10, 5, 15, 10]),
     // Tape-era records are light below the kick and live in the mids: body and
-    // warmth added, guitars and voices forward, the top eased to keep cymbals kind.
-    ("music", "Classic rock", "warm, guitars forward", [20, 10, 10, 20, -5]),
+    // warmth added, guitars and voices brought forward at 1.5 kHz, the top left alone.
+    ("music", "Classic rock", "warm, guitars forward", [20, 10, 15, 5, 5]),
     // Dense, loud modern masters: punch kept tight, the crowded low mids pulled
-    // back, bite for distorted guitars without piling on the top.
-    ("music", "Alt rock", "tight lows, bite", [25, -15, 5, 25, 10]),
+    // back, bite for distorted guitars.
+    ("music", "Alt rock", "tight lows, bite", [25, -15, 5, 20, 15]),
     // An orchestra wants the headphone out of the way: the stock bass lift taken
-    // down, the mids untouched, strings and hall air brought up gently.
-    ("music", "Classical", "natural, hall air", [-20, -10, 0, 15, 25]),
-    ("games", "Footsteps", "thin lows, presence", [-40, -15, 20, 50, 30]),
+    // down, the mids untouched, strings brought up gently.
+    ("music", "Classical", "less bass, clear strings", [-20, -10, 0, 15, 15]),
+    // The games. What they share: rumble masks the quiet sounds that give a position
+    // away, and these headphones add bass of their own, so the low band comes down;
+    // steps, reloads and the cues that say where a sound is live from about 1 to 6 kHz,
+    // so those bands come up. How far each goes depends on the game's mix.
+    //
+    // For any shooter without a curve of its own.
+    ("games", "Footsteps", "any shooter, thin lows", [-40, -15, 25, 25, 20]),
+    // Sound is the game, and it uses the whole range: steps thud on wood and splash in
+    // water, crows, chains and glass give a position away, and how far off a shot was
+    // is told by its boom and its echo. The gentlest curve here: a little rumble out,
+    // the low mids kept, the middle up, and not much treble, because the guns are loud.
+    ("games", "Hunt: Showdown", "traps, steps, far shots", [-20, 5, 20, 10, 10]),
+    // Steps are heavy and sit lower than in most shooters, and a shot is placed by
+    // its crack and its thump together: the low mids are kept and lifted a little,
+    // the middle comes up the most, vehicles and the bombing lose some rumble.
+    ("games", "PUBG", "steps, shot direction", [-25, 10, 30, 15, 10]),
+    // The busiest mix of the four: explosions, streaks and aircraft bury quiet steps.
+    // The strongest cut below, low mids included, and the most lift where steps are.
+    ("games", "Call of Duty", "steps over explosions", [-45, -20, 20, 30, 25]),
+    // Buildings come down all match long. Between the last two: the rumble of
+    // destruction down, steps, gadgets and their beeps up.
+    ("games", "The Finals", "cues over destruction", [-35, -10, 25, 20, 15]),
 ];
 
 pub fn builtin_presets() -> Vec<Preset> {
@@ -167,6 +196,18 @@ mod tests {
         }
     }
 
+    /// The headphones report one frequency for the last two bands, and whether they
+    /// are the same filter is not known. A curve that leans on the difference between
+    /// them, or stacks them, would be a different curve on each reading.
+    #[test]
+    fn builtin_curves_treat_the_twin_bands_alike() {
+        for p in builtin_presets() {
+            let (a, b) = (p.gains[3], p.gains[4]);
+            assert!((a - b).abs() <= 5, "{}: the last two bands differ by more than half a dB", p.name);
+            assert!((a + b).abs() <= 60, "{}: the last two bands add up to more than 6 dB", p.name);
+        }
+    }
+
     #[test]
     fn builtin_presets_are_distinct_and_findable() {
         let all = builtin_presets();
@@ -178,5 +219,8 @@ mod tests {
         }
         assert_eq!(find_preset(&all, "classic rock").map(|p| p.group), Some("music"));
         assert!(find_preset(&all, "post-rock").is_some());
+        for game in ["Hunt: Showdown", "pubg", "call of duty", "the finals", "footsteps"] {
+            assert_eq!(find_preset(&all, game).map(|p| p.group), Some("games"), "{game}");
+        }
     }
 }

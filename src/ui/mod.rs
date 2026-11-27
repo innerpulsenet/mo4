@@ -56,6 +56,8 @@ struct App {
     delete_asked: Option<Instant>,
     /// When the Hi-Res switch was first pressed; it goes on at the second press.
     hi_res_asked: Option<Instant>,
+    /// The preset that was just saved, until the list has scrolled to it.
+    saved: Option<String>,
     /// The paired device whose CONNECT key was pressed once, and when.
     connect_asked: Option<(u8, Instant)>,
     /// The same for SWITCH OFF on the USB card.
@@ -75,7 +77,7 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
         .with_title("MO4")
         .with_app_id("mo4")
         .with_inner_size([1240.0, 800.0])
-        .with_min_inner_size([1140.0, 790.0])
+        .with_min_inner_size([1140.0, 800.0])
         .with_icon(egui::IconData { rgba: include_bytes!("../../assets/icon-256.rgba").to_vec(), width: 256, height: 256 })
         .with_decorations(false);
     let options = eframe::NativeOptions { viewport, ..Default::default() };
@@ -105,6 +107,7 @@ pub fn run(target: Target, trace: bool, shot: Option<(String, Duration)>) -> Res
                 hint: None,
                 delete_asked: None,
                 hi_res_asked: None,
+                saved: None,
                 connect_asked: None,
                 off_asked: None,
                 shot: shot.map(|(path, delay)| Shot { path, frames: 0, requested: false, started: Instant::now(), delay }),
@@ -521,15 +524,22 @@ impl App {
         egui::ScrollArea::vertical().show(&mut child, |ui| {
             let mut group = "";
             let heading = |ui: &mut Ui, text: &str| {
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
-                widgets::caption(ui.painter(), Rect::from_min_max(pos2(r.left() + 11.0, r.top() + 8.0), pos2(r.right() - 9.0, r.bottom())), text);
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
+                widgets::caption(ui.painter(), Rect::from_min_max(pos2(r.left() + 11.0, r.top() + 7.0), pos2(r.right() - 9.0, r.bottom())), text);
             };
             for preset in self.presets.iter().filter(|x| x.gains.len() == bands) {
                 if preset.group != group {
                     group = preset.group;
                     heading(ui, group);
                 }
-                let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), if usable { Sense::click() } else { Sense::hover() });
+                // Rows are as tight as two lines allow, so every built-in curve is in view
+                // at the window's first size; the list scrolls once your own are added.
+                let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 27.5), if usable { Sense::click() } else { Sense::hover() });
+                if self.saved.as_deref() == Some(preset.name.as_str()) {
+                    // A curve that was just saved is brought into view.
+                    resp.scroll_to_me(Some(egui::Align::Center));
+                    self.saved = None;
+                }
                 let active = usable && preset.gains == shown;
                 let rp = widgets::painter(ui, usable);
                 let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered() && usable);
@@ -540,9 +550,9 @@ impl App {
                     rp.rect_filled(Rect::from_min_size(row.min + vec2(2.0, 5.0), vec2(2.0, row.height() - 10.0)), CornerRadius::same(1), TINT);
                 }
                 let text_clip = rp.with_clip_rect(Rect::from_min_max(row.min, pos2(row.right() - 46.0, row.bottom())).intersect(rp.clip_rect()));
-                text_clip.text(row.min + vec2(11.0, 2.0), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
-                text_clip.text(row.min + vec2(11.0, 16.5), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
-                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 8.0), pos2(row.right() - 9.0, row.bottom() - 8.0)), &preset.gains, if active { TINT } else { steel::TEXT_3 });
+                text_clip.text(row.min + vec2(11.0, 0.5), Align2::LEFT_TOP, &preset.name, semi(12.5), steel::TEXT);
+                text_clip.text(row.min + vec2(11.0, 14.0), Align2::LEFT_TOP, &preset.note, sans(11.0), steel::TEXT_3);
+                widgets::spark(&rp, Rect::from_min_max(pos2(row.right() - 42.0, row.top() + 7.0), pos2(row.right() - 9.0, row.bottom() - 7.0)), &preset.gains, if active { TINT } else { steel::TEXT_3 });
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, usable, active, format!("Preset {}", preset.name)));
                 if resp.has_focus() {
                     rp.rect_stroke(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(steel::R_KEY), Stroke::new(1.0, steel::EMBER), StrokeKind::Inside);
@@ -554,9 +564,8 @@ impl App {
             if !self.presets.iter().any(|x| !x.builtin) {
                 // Nothing of the user's own yet: say how to get one here.
                 heading(ui, store::YOURS);
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
-                let g = ui.painter().layout("Shape a curve and press SAVE AS to keep it here.".to_owned(), sans(11.5), steel::TEXT_3, r.width() - 22.0);
-                ui.painter().galley(r.min + vec2(11.0, 2.0), g, steel::TEXT_3);
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
+                ui.painter().text(r.min + vec2(11.0, 2.0), Align2::LEFT_TOP, "SAVE AS keeps a curve here.", sans(11.0), steel::TEXT_3);
             }
         });
         if let Some(gains) = apply {
@@ -656,7 +665,10 @@ impl App {
         self.presets.retain(|x| !x.name.eq_ignore_ascii_case(name));
         self.presets.push(Preset { name: name.to_string(), note: "saved by you".into(), gains, builtin: false, group: store::YOURS });
         match store::save_presets(&self.presets) {
-            Ok(()) => self.note(format!("Preset \"{name}\" saved"), Tone::Good),
+            Ok(()) => {
+                self.saved = Some(name.to_string());
+                self.note(format!("Preset \"{name}\" saved"), Tone::Good);
+            }
             Err(e) => self.note(format!("Could not save presets: {e}"), Tone::Bad),
         }
     }

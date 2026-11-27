@@ -225,7 +225,7 @@ pub fn run(args: &[String], target: &Target, trace: bool) -> Result<(), String> 
         Some("help") | Some("--help") | Some("-h") => print!("{HELP}"),
         Some("presets") => {
             for p in store::load_presets() {
-                println!("{:<6} {:<13} {:<28} {}", p.group, p.name, device::gains_text(&p.gains), p.note);
+                println!("{:<6} {:<15} {:<26} {}", p.group, p.name, device::gains_text(&p.gains), p.note);
             }
         }
         Some("status") => {

@@ -91,22 +91,43 @@ each still has its own gain, and the window says so when you point at them.
 | Group | Preset | Curve | For |
 |---|---|---|---|
 | Tone | Flat | 0 0 0 0 0 | no change |
-| Tone | Warm | +3.0 +1.5 0 -1.0 -2.0 | fuller lows, a softer top |
-| Tone | Bass | +5.0 +2.5 0 0 0 | low-end weight |
-| Tone | Vocal | -2.0 0 +3.0 +2.0 0 | voices forward |
-| Tone | Bright | 0 0 0 +2.5 +4.0 | air and detail |
-| Tone | Loudness | +4.0 +1.0 -1.0 +1.5 +3.5 | a gentle V for low volume |
-| Tone | Night | -3.0 0 +1.5 +2.0 -1.0 | easy on the ears |
-| Music | Post-rock | +1.5 -1.5 0 +1.0 +2.5 | post-rock, dream pop, ambient electronica: depth for pads, a clear wash, air on top |
+| Tone | Warm | +3.0 +1.5 0 -1.5 -1.5 | fuller lows, a softer top |
+| Tone | Bass | +5.0 +1.0 0 0 0 | low-end weight |
+| Tone | Vocal | -2.0 0 +3.0 +1.0 +1.0 | voices forward |
+| Tone | Bright | 0 0 0 +2.0 +2.0 | more treble detail |
+| Tone | Loudness | +4.0 +1.0 -1.0 +2.5 +2.5 | a gentle V for low volume |
+| Tone | Night | -3.0 0 +1.5 +0.5 +0.5 | less bass, clear voices |
+| Music | Post-rock | +1.5 -1.5 0 +1.5 +1.5 | post-rock, dream pop, ambient electronica: depth for pads, a clear wash, a lifted top |
 | Music | Rap | +3.5 -1.0 +0.5 +1.5 +1.0 | sub-bass weight with the voice kept in front |
-| Music | Classic rock | +2.0 +1.0 +1.0 +2.0 -0.5 | body and warmth, guitars forward, an easier top |
-| Music | Alt rock | +2.5 -1.5 +0.5 +2.5 +1.0 | tight punch, less mud, guitar bite |
-| Music | Classical | -2.0 -1.0 0 +1.5 +2.5 | less of the stock bass lift, strings and hall air |
-| Games | Footsteps | -4.0 -1.5 +2.0 +5.0 +3.0 | thin lows, lifted presence |
+| Music | Classic rock | +2.0 +1.0 +1.5 +0.5 +0.5 | body and warmth, guitars forward |
+| Music | Alt rock | +2.5 -1.5 +0.5 +2.0 +1.5 | tight punch, less mud, guitar bite |
+| Music | Classical | -2.0 -1.0 0 +1.5 +1.5 | less of the stock bass lift, clear strings |
+| Games | Footsteps | -4.0 -1.5 +2.5 +2.5 +2.0 | any shooter without a curve of its own |
+| Games | Hunt: Showdown | -2.0 +0.5 +2.0 +1.0 +1.0 | the gentlest: sound traps, steps on every surface, how far off a shot was |
+| Games | PUBG | -2.5 +1.0 +3.0 +1.5 +1.0 | heavy steps and the direction of a shot, less vehicle rumble |
+| Games | Call of Duty | -4.5 -2.0 +2.0 +3.0 +2.5 | the strongest: steps over explosions and streaks |
+| Games | The Finals | -3.5 -1.0 +2.5 +2.0 +1.5 | steps and gadgets over collapsing buildings |
 
-The music presets are starting points by ear, not measurements. They assume the
+These are starting points by ear and by reasoning, not measurements. They assume the
 bass-forward tuning reviewers agree these headphones have, so they add less bass than a
 curve for a neutral headphone would. Change them to taste and keep your own.
+
+### What the curves rest on
+
+The headphones say where each band is and how wide (the first is wider than the rest),
+but not what kind of filter it is, and nobody has published a measurement. The last two
+bands may be the same bell twice, or a bell and a shelf. Every built-in curve was
+worked out for both, and for a shelf at each end: it keeps the last two bands within
+half a dB of each other and their sum inside 6 dB, so its shape holds either way and no
+point of it moves by more than about 2 dB between the readings.
+
+The game curves share one idea. Rumble masks the quiet sounds that give a position
+away, and these headphones add bass of their own, so the low band comes down; steps,
+reloads and the cues that place a sound sit from about 1 to 6 kHz, so those bands come
+up. How far each one goes follows the game's mix. Published advice on which frequencies
+carry footsteps disagrees from guide to guide, and no equalizer adds positional cues a
+game did not mix in: use the game's own headphone mode, and don't put a second
+virtual-surround layer on top of it.
 
 ## Install
 
