@@ -174,13 +174,17 @@ impl eframe::App for App {
         let body = Rect::from_min_max(pos2(full.left() + 12.0, bar.bottom() + 14.0), pos2(full.right() - 12.0, foot.top() - 12.0));
         let gap = 10.0;
         let left = Rect::from_min_max(body.min, pos2(body.left() + 304.0, body.bottom()));
+        // The noise panel is as tall as its controls; the paired devices take the rest.
+        let noise_r = Rect::from_min_max(left.min, pos2(left.right(), left.top() + 502.0));
+        let paired_r = Rect::from_min_max(pos2(left.left(), noise_r.bottom() + gap), left.max);
         let right = Rect::from_min_max(pos2(body.right() - 284.0, body.top()), body.max);
         let center = Rect::from_min_max(pos2(left.right() + gap, body.top()), pos2(right.left() - gap, body.bottom()));
         let device_r = Rect::from_min_max(right.min, pos2(right.right(), right.top() + 296.0));
         let settings_r = Rect::from_min_max(pos2(right.left(), device_r.bottom() + gap), right.max);
 
         self.hint = None;
-        self.noise_panel(ui, left, online);
+        self.noise_panel(ui, noise_r, online);
+        self.connections_panel(ui, paired_r, online);
         self.eq_panel(ui, center, online);
         self.device_panel(ui, device_r);
         self.settings_panel(ui, settings_r, online);
@@ -189,7 +193,7 @@ impl eframe::App for App {
             self.offline_card(ui, body);
         }
         if self.show_log {
-            self.log_card(ui, foot);
+            self.log_card(ui, body, foot);
         }
         steel::resize_edges(&ctx);
         steel::outline(&ctx);
@@ -265,7 +269,7 @@ impl App {
         }
         widgets::mark(&p, Rect::from_center_size(pos2(bar.left() + 26.0, bar.center().y), vec2(24.0, 22.0)), steel::EMBER);
         let word = steel::steel_text(&p, pos2(bar.left() + 46.0, bar.center().y + 0.5), Align2::LEFT_CENTER, "MO4", widgets::display(21.0));
-        widgets::legend(&p, pos2(word.right() + 14.0, bar.center().y + 1.0), Align2::LEFT_CENTER, "headphone control", 9.5, steel::TEXT_3);
+        widgets::legend(&p, pos2(word.right() + 14.0, bar.center().y + 1.0), Align2::LEFT_CENTER, "headphone control", 9.5, widgets::QUIET);
 
         // Minimize, maximize, close, left to right, and visited by Tab in that order.
         let mut x = bar.right() - 8.0 - 3.0 * 36.0;
@@ -375,63 +379,88 @@ impl App {
         if let Some(v) = widgets::switch_row(ui, row(y), "th-pause", "Pause when transparent", "Pause playback while transparent hearing is on", pause, online) {
             self.send(Setting::PauseOnTransparency(v));
         }
-        y += 30.0 + 10.0;
+    }
 
-        if inner.bottom() - y > 44.0 {
-            let title = match d.max_connections {
-                Some(n) => format!("paired devices, {n} at once"),
-                None => "paired devices".into(),
-            };
-            widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), &title);
-            y += 20.0;
-            if d.paired.is_empty() {
-                p.text(pos2(inner.left(), y + 8.0), Align2::LEFT_CENTER, if online { "not reported" } else { "no reading" }, mono(11.0), steel::TEXT_3);
+    /// The devices the headphones are paired with: which are connected, which is this
+    /// computer, and a key to have the headphones connect to one that is not.
+    fn connections_panel(&mut self, ui: &mut Ui, r: Rect, online: bool) {
+        const ROW: f32 = 24.0;
+        let p = ui.painter().clone();
+        let inner = widgets::section(&p, r, "paired devices");
+        let d = self.snap.dev.clone();
+        if let Some(n) = d.max_connections {
+            widgets::legend(&p, pos2(inner.right(), r.top() + 13.0), Align2::RIGHT_TOP, &format!("up to {n} connected"), 9.5, widgets::QUIET);
+        }
+        if d.paired.is_empty() {
+            p.text(pos2(inner.left(), inner.top() + 9.0), Align2::LEFT_CENTER, if online { "not reported" } else { "no reading" }, mono(11.0), widgets::QUIET);
+            return;
+        }
+        // What the keys here will and will not do, when there is room to say it.
+        let note = p.layout("MO4 can ask the headphones to connect a device. It never disconnects or forgets one.".to_owned(), sans(11.5), widgets::QUIET, inner.width());
+        let note_h = note.size().y + 10.0;
+        let with_note = online && d.own_index.is_some() && inner.height() >= d.paired.len().min(3) as f32 * ROW + note_h;
+        let list_h = inner.height() - if with_note { note_h } else { 0.0 };
+        let rows = (list_h / ROW).floor().max(1.0) as usize;
+        if with_note {
+            // Straight under the list, so the two are read together at any height.
+            let shown = d.paired.len().min(rows) as f32;
+            p.galley(pos2(inner.left(), inner.top() + shown * ROW + 8.0), note, widgets::QUIET);
+        }
+        let (mut connect, mut ask) = (None, None);
+        for (i, dev) in d.paired.iter().enumerate().take(rows) {
+            let cy = inner.top() + ROW / 2.0 - 2.0 + i as f32 * ROW;
+            if i + 1 == rows && d.paired.len() > rows {
+                p.text(pos2(inner.left(), cy), Align2::LEFT_CENTER, format!("and {} more", d.paired.len() - i), mono(11.0), widgets::QUIET);
+                break;
             }
-            let rows = ((inner.bottom() - y) / 20.0).floor() as usize;
-            let (mut connect, mut ask) = (None, None);
-            for (i, dev) in d.paired.iter().enumerate().take(rows) {
-                let cy = y + 9.0 + i as f32 * 20.0;
-                if i + 1 == rows && d.paired.len() > rows {
-                    p.text(pos2(inner.left(), cy), Align2::LEFT_CENTER, format!("and {} more", d.paired.len() - i), mono(11.0), steel::TEXT_3);
-                    break;
-                }
+            let pending = self.holds.values().any(|(s, _)| matches!(s, Setting::Connect { index, .. } if *index == dev.index));
+            if pending {
+                steel::lamp(&p, pos2(inner.left() + 5.0, cy), 3.2, steel::AMBER, pulse(ui.ctx()), LampShape::Round);
+            } else {
                 steel::lamp(&p, pos2(inner.left() + 5.0, cy), 3.2, steel::MINT, if dev.connected { 1.0 } else { 0.0 }, LampShape::Round);
-                let name = if dev.name.is_empty() { "unnamed device" } else { dev.name.as_str() };
-                let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 84.0, cy + 10.0)));
-                clip.text(pos2(inner.left() + 16.0, cy), Align2::LEFT_CENTER, name, sans(12.0), if dev.connected { steel::TEXT } else { steel::TEXT_3 });
-                let pending = self.holds.values().any(|(s, _)| matches!(s, Setting::Connect { index, .. } if *index == dev.index));
-                if d.own_index == Some(dev.index) {
-                    p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "THIS COMPUTER", mono_bold(9.5), steel::TEXT_2);
-                } else if dev.connected {
-                    p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTED", mono_bold(9.5), steel::TEXT_3);
-                } else if pending {
-                    p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTING", mono_bold(9.5), steel::TEXT_2);
-                } else if online && d.own_index.is_some() {
-                    // Only offered once the headphones have said which entry is this computer.
-                    let asking = self.connect_asked.is_some_and(|(i, at)| i == dev.index && at.elapsed() < ASK_TIME);
-                    let key = Rect::from_min_max(pos2(inner.right() - 72.0, cy - 9.0), pos2(inner.right(), cy + 9.0));
-                    let tip = if asking { "Press again to connect" } else { "Have the headphones connect to this device" };
-                    if widgets::key(ui, key, ("connect", dev.index), if asking { "REALLY?" } else { "CONNECT" }, asking, if asking { steel::AMBER } else { TINT }, true, false).on_hover_text(tip).clicked() {
-                        if asking {
-                            connect = Some(Setting::Connect { index: dev.index, name: dev.name.clone() });
-                        } else {
-                            let full = d.max_connections.is_some_and(|n| d.paired.iter().filter(|x| x.connected).count() >= usize::from(n));
-                            let caution = if full { " They are at their limit, so another device may be dropped." } else { "" };
-                            ask = Some((dev.index, format!("Press again and the headphones will try to connect to {name}.{caution}")));
-                        }
+            }
+            let name = if dev.name.is_empty() { "unnamed device" } else { dev.name.as_str() };
+            let clip = p.with_clip_rect(Rect::from_min_max(pos2(inner.left(), cy - 10.0), pos2(inner.right() - 96.0, cy + 10.0)));
+            clip.text(pos2(inner.left() + 16.0, cy), Align2::LEFT_CENTER, name, sans(12.5), if dev.connected || pending { steel::TEXT } else { steel::TEXT_2 });
+            if d.own_index == Some(dev.index) {
+                p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "THIS COMPUTER", mono_bold(9.5), steel::TEXT_2);
+            } else if dev.connected {
+                p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTED", mono_bold(9.5), widgets::QUIET);
+            } else if pending {
+                p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "CONNECTING", mono_bold(9.5), steel::TEXT_2);
+            } else if online && d.own_index.is_some() {
+                // Only offered once the headphones have said which entry is this computer.
+                let asking = self.connect_asked.is_some_and(|(i, at)| i == dev.index && at.elapsed() < ASK_TIME);
+                let key = Rect::from_min_max(pos2(inner.right() - 78.0, cy - 10.0), pos2(inner.right(), cy + 10.0));
+                let full = d.max_connections.is_some_and(|n| d.paired.iter().filter(|x| x.connected).count() >= usize::from(n));
+                let caution = if full { " They are at their limit, so another device may be dropped." } else { "" };
+                let words = format!("Press again and the headphones will try to connect to {name}.{caution}");
+                let resp = widgets::key(ui, key, ("connect", dev.index), if asking { "REALLY?" } else { "CONNECT" }, asking, if asking { steel::AMBER } else { TINT }, true, false);
+                if asking {
+                    // The reason is said at the key, not only in the foot of the window.
+                    resp.show_tooltip_text(words.as_str());
+                }
+                let resp = if asking { resp } else { resp.on_hover_text("Have the headphones connect to this device") };
+                if resp.clicked() {
+                    if asking {
+                        connect = Some(Setting::Connect { index: dev.index, name: dev.name.clone() });
+                    } else {
+                        ask = Some((dev.index, words));
                     }
                 }
+            } else {
+                p.text(pos2(inner.right(), cy), Align2::RIGHT_CENTER, "NOT CONNECTED", mono_bold(9.5), steel::TEXT_3);
             }
-            if let Some((index, text)) = ask {
-                self.connect_asked = Some((index, Instant::now()));
-                self.note(text, Tone::Info);
-                ui.ctx().request_repaint_after(ASK_TIME);
-            }
-            if let Some(setting) = connect {
-                self.connect_asked = None;
-                self.notice = None;
-                self.send(setting);
-            }
+        }
+        if let Some((index, text)) = ask {
+            self.connect_asked = Some((index, Instant::now()));
+            self.note(text, Tone::Info);
+            ui.ctx().request_repaint_after(ASK_TIME);
+        }
+        if let Some(setting) = connect {
+            self.connect_asked = None;
+            self.notice = None;
+            self.send(setting);
         }
     }
 
@@ -453,6 +482,9 @@ impl App {
             ("NO READING", steel::TEXT_3, LampShape::Round, 0.0)
         } else if !usable {
             ("NEEDS FIRMWARE 3.18 OR NEWER", steel::WARN, LampShape::Triangle, 1.0)
+        } else if sound_mode == Some(3) {
+            // Sound personalization replaces the equalizer; it is the phone app's to run.
+            ("PERSONALIZED IN THE PHONE APP", widgets::TINT_2, LampShape::Round, 1.0)
         } else if !audible {
             ("BYPASSED", steel::TEXT_3, LampShape::Round, 0.0)
         } else if Some(&shown) != device_curve.as_ref() {
@@ -461,14 +493,20 @@ impl App {
             ("ON THE HEADPHONES", steel::OK, LampShape::Round, 1.0)
         };
         steel::lamp(&p, pos2(top.left() + 5.0, top.center().y), 3.6, color, lit, shape);
-        p.text(pos2(top.left() + 17.0, top.center().y), Align2::LEFT_CENTER, word, mono_bold(10.5), steel::TEXT_2);
-        let sel = Rect::from_min_max(pos2(top.right() - 268.0, top.top()), top.max);
+        let status = p.text(pos2(top.left() + 17.0, top.center().y), Align2::LEFT_CENTER, word, mono_bold(10.5), steel::TEXT_2);
+        // The three keys give up a little width before their label is dropped: without
+        // it "OFF" beside the status line could be read as switching the headphones off.
+        let label_w = widgets::legend(&p.with_clip_rect(Rect::NOTHING), top.left_center(), Align2::LEFT_CENTER, "sound mode", 9.5, widgets::QUIET).width();
+        let free = top.right() - status.right() - 28.0 - label_w - 10.0;
+        let labeled = free >= 222.0;
+        let sel = Rect::from_min_max(pos2(top.right() - if labeled { free.min(268.0) } else { 268.0 }, top.top()), top.max);
         let current = sound_mode.filter(|m| *m <= 2).map(usize::from);
         if let Some(i) = widgets::selector(ui, sel, "sound-mode", &["OFF", "EQUALIZER", "PODCAST"], current, TINT, online && d.sound_mode.is_some()) {
             self.send(Setting::SoundMode(i as u16));
         }
-        let mode_name = if sound_mode == Some(3) { "sound mode: personalized in the phone app" } else { "sound mode" };
-        widgets::legend(&p, pos2(sel.left() - 10.0, top.center().y), Align2::RIGHT_CENTER, mode_name, 9.5, steel::TEXT_3);
+        if labeled {
+            widgets::legend(&p, pos2(sel.left() - 10.0, top.center().y), Align2::RIGHT_CENTER, "sound mode", 9.5, widgets::QUIET);
+        }
 
         let keys_y = inner.bottom() - 26.0;
         let list = Rect::from_min_max(pos2(inner.left(), top.bottom() + 12.0), pos2(inner.left() + 178.0, keys_y - 12.0));
@@ -532,7 +570,15 @@ impl App {
         if let Some(curve) = ev.curve {
             self.drag(Setting::EqGains(curve), ev.released);
         }
-        if usable && ui.rect_contains_pointer(graph) {
+        if usable && (ui.rect_contains_pointer(graph) || ui.rect_contains_pointer(list)) {
+            // A curve that is not being heard looks the same in the list and on the keys.
+            match sound_mode {
+                Some(0) => self.hint = Some("Sound mode is off, so the curve is not heard. Changing the curve switches the equalizer on.".into()),
+                Some(2) => self.hint = Some("Podcast mode is on: the curve is kept but not heard until the sound mode is Equalizer.".into()),
+                _ => {}
+            }
+        }
+        if usable && audible && ui.rect_contains_pointer(graph) {
             // Two bands with one frequency look like a mistake, so say whose number it is.
             let twin = ev.hovered.and_then(|band| {
                 let hz = |i: usize| d.eq_freqs.get(i).copied().flatten();
@@ -541,7 +587,7 @@ impl App {
                 beside.then_some(here)
             });
             self.hint = Some(match twin {
-                Some(hz) => format!("The headphones report {} for this band and for the one next to it. Each has its own gain: drag, scroll or use the arrow keys.", hz_words(hz)),
+                Some(hz) => format!("The headphones report {} for this band and its neighbor. Each has its own gain: drag, scroll or use the arrow keys.", hz_words(hz)),
                 None => "Drag a node, scroll over a band, or use the arrow keys. Hold Shift for tenths of a dB. Double-click a node to zero it.".into(),
             });
         }
@@ -562,8 +608,8 @@ impl App {
         if let Some(mut name) = self.naming.take() {
             let field = Rect::from_min_max(pos2(right - 318.0, keys_y), pos2(right - 138.0, keys_y + 26.0));
             steel::well(&p, field, Some(TINT));
-            let edit = egui::TextEdit::singleline(&mut name).hint_text("name this curve").font(sans(12.5)).frame(egui::Frame::NONE).margin(egui::Margin::symmetric(8, 5)).char_limit(24);
-            let resp = ui.put(field, edit);
+            let edit = egui::TextEdit::singleline(&mut name).hint_text("name this curve").font(sans(12.5)).frame(egui::Frame::NONE).margin(egui::Margin::symmetric(8, 0)).vertical_align(egui::Align::Center).char_limit(24);
+            let resp = ui.put(field.shrink2(vec2(9.0, 0.0)), edit);
             if !resp.has_focus() && !resp.lost_focus() {
                 resp.request_focus();
             }
@@ -694,7 +740,7 @@ impl App {
         if !asking {
             self.hi_res_asked = None;
         }
-        let tip = if asking { "Press again to switch Hi-Res on. Playback may be interrupted" } else { "Accept 24-bit/96 kHz audio over aptX Adaptive. Off is the steadier link" };
+        let tip = if asking { "Hi-Res changes the audio link and may interrupt playback. Press again to switch it on." } else { "Accept 24-bit/96 kHz audio over aptX Adaptive. Off is the steadier link" };
         if let Some(want) = widgets::switch_row_asking(ui, row(y), "hi-res", "Hi-Res audio", tip, v, online, asking) {
             if want && !asking {
                 // Going on changes what the audio link carries, so it takes two presses.
@@ -733,27 +779,42 @@ impl App {
         };
         widgets::caption(&p, Rect::from_min_max(pos2(inner.left(), y), pos2(inner.right(), y + 12.0)), &title);
         y += 16.0;
-        let (moved, released) = widgets::fader(ui, row(y), "sidetone", side.unwrap_or(0).min(SIDETONE_MAX), SIDETONE_MAX, online && side.is_some());
+        let (moved, released) = widgets::fader(ui, row(y), "sidetone", side.map(|v| v.min(SIDETONE_MAX)), SIDETONE_MAX, online);
         if let Some(v) = moved {
             self.drag(Setting::Sidetone(v), released);
         }
     }
 
     fn footer(&mut self, ui: &mut Ui, foot: Rect) {
+        // Where the footer's two columns start: the time (or the word HINT), then the line.
+        const TIME_X: f32 = 34.0;
+        const TEXT_X: f32 = 102.0;
         let p = ui.painter().clone();
         let cy = foot.center().y;
         let area = Rect::from_min_max(foot.min, pos2(foot.right() - FOOT_MARK_W, foot.bottom()));
-        let resp = ui.interact(area, ui.id().with("footer"), Sense::click()).on_hover_text("Click for the history");
+        let resp = ui.interact(area, ui.id().with("footer"), Sense::click()).on_hover_text(if self.show_log { "Click to close the history" } else { "Click for the history" });
         if resp.clicked() {
             self.show_log = !self.show_log;
         }
+        // The strip is a control: it lifts under the pointer, and an arrow says which
+        // way the history opens.
+        let lift = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered());
+        if lift > 0.0 {
+            p.rect_filled(area.shrink2(vec2(0.0, 1.0)), CornerRadius::ZERO, Color32::from_white_alpha((7.0 * lift) as u8));
+        }
+        let (tip, base) = if self.show_log { (cy + 2.5, cy - 2.5) } else { (cy - 2.5, cy + 2.5) };
+        let x = foot.left() + 20.0;
+        p.add(egui::Shape::convex_polygon(vec![pos2(x - 4.0, base), pos2(x + 4.0, base), pos2(x, tip)], steel::lerp(widgets::QUIET, steel::TEXT, lift), Stroke::NONE));
+
+        let clip = p.with_clip_rect(area);
         // What just happened outranks how to use the thing under the pointer.
         let fresh = self.snap.log.back().is_some_and(|l| l.when.elapsed() < Duration::from_secs(5));
         if fresh {
             ui.ctx().request_repaint_after(Duration::from_secs(1));
         }
         if let (Some(hint), None, false) = (self.hint.as_deref(), &self.notice, fresh) {
-            p.with_clip_rect(area).text(pos2(foot.left() + 16.0, cy), Align2::LEFT_CENTER, hint, sans(12.0), steel::TEXT_2);
+            widgets::legend(&p, pos2(foot.left() + TIME_X, cy), Align2::LEFT_CENTER, "hint", 9.5, widgets::QUIET);
+            clip.text(pos2(foot.left() + TEXT_X, cy), Align2::LEFT_CENTER, hint, mono(11.0), steel::TEXT_2);
             self.foot_mark(ui, foot);
             return;
         }
@@ -769,13 +830,12 @@ impl App {
             LinkState::Online => None,
         });
         if let Some((at, text, tone)) = line {
-            let t = p.text(pos2(foot.left() + 16.0, cy), Align2::LEFT_CENTER, at, mono(11.0), steel::TEXT_3);
+            p.text(pos2(foot.left() + TIME_X, cy), Align2::LEFT_CENTER, at, mono(11.0), widgets::QUIET);
             let color = match tone {
                 Tone::Bad => steel::ERR,
                 Tone::Good | Tone::Info => steel::TEXT_2,
             };
-            let clip = p.with_clip_rect(area);
-            clip.text(pos2(t.right() + 12.0, cy), Align2::LEFT_CENTER, text, mono(11.0), color);
+            clip.text(pos2(foot.left() + TEXT_X, cy), Align2::LEFT_CENTER, text, mono(11.0), color);
         }
         self.foot_mark(ui, foot);
     }
@@ -784,10 +844,10 @@ impl App {
     fn foot_mark(&self, ui: &mut Ui, foot: Rect) {
         let p = ui.painter().clone();
         let cy = foot.center().y;
-        let t = p.text(pos2(foot.right() - 16.0, cy), Align2::RIGHT_CENTER, "innerpulse", mono(11.0), steel::TEXT_3);
+        let t = p.text(pos2(foot.right() - 16.0, cy), Align2::RIGHT_CENTER, "innerpulse", mono(11.0), widgets::QUIET);
         let mark = Rect::from_center_size(pos2(t.left() - 13.0, cy), vec2(13.0, 12.0));
         widgets::mark(&p, mark, steel::EMBER);
-        let v = p.text(pos2(mark.left() - 18.0, cy), Align2::RIGHT_CENTER, format!("MO4 {}", crate::VERSION), mono(11.0), steel::TEXT_3);
+        let v = p.text(pos2(mark.left() - 18.0, cy), Align2::RIGHT_CENTER, format!("MO4 {}", crate::VERSION), mono(11.0), widgets::QUIET);
         let built = match crate::COMMIT {
             Some(commit) => format!("MO4 {}, built from commit {commit}", crate::VERSION),
             None => format!("MO4 {}", crate::VERSION),
@@ -795,16 +855,24 @@ impl App {
         ui.interact(v.expand2(vec2(6.0, 8.0)), ui.id().with("version"), Sense::hover()).on_hover_text(built);
     }
 
-    /// The history: a sheet of glass over the foot of the window.
-    fn log_card(&mut self, ui: &mut Ui, foot: Rect) {
+    /// The history: a sheet of glass over the foot of the window. While it is open the
+    /// controls behind it are darkened and take no clicks; a click anywhere, or Escape,
+    /// closes it.
+    fn log_card(&mut self, ui: &mut Ui, body: Rect, foot: Rect) {
         let lines: Vec<_> = self.snap.log.iter().rev().take(12).collect();
         let h = 34.0 + lines.len().max(1) as f32 * 19.0;
         let card = Rect::from_min_max(pos2(foot.left() + 12.0, foot.top() - h - 8.0), pos2(foot.left() + 700.0, foot.top() - 8.0));
+        // Registered after every panel, so it is on top of them and the click stops here.
+        let behind = Rect::from_min_max(pos2(foot.left(), body.top() - 14.0), pos2(foot.right(), foot.top() - 2.0));
+        let shield = ui.interact(behind, ui.id().with("history-shield"), Sense::click());
         let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("log-card")));
+        p.rect_filled(behind, CornerRadius::ZERO, Color32::from_black_alpha(120));
         // Opaque: text from the controls underneath must not show through the lines.
+        p.rect(card.expand(1.0).translate(vec2(0.0, 6.0)), CornerRadius::same(steel::R_GLASS + 2), Color32::from_black_alpha(70), Stroke::NONE, StrokeKind::Outside);
         p.rect(card, CornerRadius::same(steel::R_GLASS), steel::SURFACE_1, Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
         steel::glass(&p, card);
         widgets::legend(&p, card.min + vec2(14.0, 11.0), Align2::LEFT_TOP, "history", 9.5, steel::TEXT_3);
+        widgets::legend(&p, pos2(card.right() - 14.0, card.top() + 11.0), Align2::RIGHT_TOP, "click anywhere or press esc to close", 9.5, steel::TEXT_3);
         if lines.is_empty() {
             p.text(card.min + vec2(14.0, 38.0), Align2::LEFT_CENTER, "Nothing has happened yet", mono(11.0), steel::TEXT_3);
         }
@@ -814,14 +882,14 @@ impl App {
             let clip = p.with_clip_rect(card.shrink(8.0));
             clip.text(pos2(card.left() + 86.0, y), Align2::LEFT_CENTER, &l.text, mono(11.0), if l.tone == Tone::Bad { steel::ERR } else { steel::TEXT_2 });
         }
-        if ui.input(|i| i.pointer.any_click()) && !ui.rect_contains_pointer(Rect::from_min_max(foot.min, pos2(foot.right() - FOOT_MARK_W, foot.bottom()))) {
+        if shield.clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_log = false;
         }
     }
 
     /// Shown over the controls while there are no headphones to talk to.
     fn offline_card(&mut self, ui: &mut Ui, body: Rect) {
-        const BLUETOOTH: &str = "MO4 talks to the headphones over Bluetooth. Pair and connect them in the system's Bluetooth settings; this window finds them on its own.";
+        const BLUETOOTH: &str = "MO4 talks to the headphones over Bluetooth. Pair and connect them in the system's Bluetooth settings; MO4 finds them on its own.";
         let (title, why, hint, lamp) = match &self.snap.link {
             LinkState::Searching(what) => ("looking for the headphones", what.clone(), BLUETOOTH.to_owned(), (steel::AMBER, LampShape::Round, pulse(ui.ctx()))),
             LinkState::Offline(why) => ("not connected", why.clone(), BLUETOOTH.to_owned(), (steel::ERR, LampShape::Square, 1.0)),
@@ -835,12 +903,14 @@ impl App {
                 (
                     "on usb, no control",
                     seen.to_owned(),
-                    format!("For control, pair and connect the headphones in the system's Bluetooth settings; this window finds them on its own. Bluetooth says: {why}.{version}"),
+                    format!("For control, pair and connect the headphones in the system's Bluetooth settings; MO4 finds them on its own. Bluetooth says: {why}.{version}"),
                     (steel::AMBER, LampShape::Square, 1.0),
                 )
             }
             LinkState::Online => return,
         };
+        // A reason is a sentence, wherever it came from.
+        let why = if why.ends_with(['.', '!', '?', '…']) { why } else { format!("{why}.") };
         let searching = matches!(self.snap.link, LinkState::Searching(_));
         let p = ui.painter().clone();
         let width = 470.0;
@@ -849,7 +919,7 @@ impl App {
         let h = 62.0 + text.size().y + 14.0 + hint.size().y + 60.0;
         let card = Rect::from_center_size(body.center(), vec2(width, h));
         // The controls behind have nothing to show: darken them so the card reads alone.
-        p.rect_filled(body.expand(4.0), CornerRadius::same(steel::R_GLASS), Color32::from_black_alpha(96));
+        p.rect_filled(body.expand(4.0), CornerRadius::same(steel::R_GLASS), Color32::from_black_alpha(150));
         p.rect(card.expand(1.0).translate(vec2(0.0, 8.0)), CornerRadius::same(steel::R_GLASS + 2), Color32::from_black_alpha(70), Stroke::NONE, StrokeKind::Outside);
         p.rect(card, CornerRadius::same(steel::R_GLASS), steel::alpha(steel::SURFACE_1, 0.96), Stroke::new(1.0, Color32::from_black_alpha(220)), StrokeKind::Outside);
         steel::glass(&p, card);

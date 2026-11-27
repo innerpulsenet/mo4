@@ -54,19 +54,24 @@ pub fn legend(p: &Painter, pos: Pos2, anchor: Align2, text: &str, size: f32, col
 
 /// A section: a groove cut around part of the plate, with its name at the top left
 /// behind an ember tick. Returns the area left for its contents.
+/// Small legends and labels on the steel plate. The brand's dimmest text gray falls
+/// short of 4.5:1 on the brushed plate at these sizes; this is that gray raised until
+/// it clears it. On the dark wells the brand gray is used as it is.
+pub const QUIET: Color32 = Color32::from_rgb(0xac, 0xb1, 0xb7);
+
 pub fn section(p: &Painter, r: Rect, title: &str) -> Rect {
     let cr = CornerRadius::same(steel::R_GLASS);
     p.rect_stroke(r, cr, Stroke::new(1.0, Color32::from_black_alpha(150)), StrokeKind::Inside);
     p.rect_stroke(r.shrink(1.0), cr, Stroke::new(1.0, Color32::from_white_alpha(steel::LIP_SOFT)), StrokeKind::Inside);
     let tick = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(2.0, 9.0));
     p.rect_filled(tick, CornerRadius::same(1), steel::EMBER);
-    legend(p, r.min + vec2(22.0, 13.0), Align2::LEFT_TOP, title, 10.0, steel::TEXT_3);
+    legend(p, r.min + vec2(22.0, 13.0), Align2::LEFT_TOP, title, 10.0, QUIET);
     Rect::from_min_max(r.min + vec2(14.0, 36.0), r.max - vec2(14.0, 14.0))
 }
 
 /// A small caption over a group of controls, with a groove running out to the right.
 pub fn caption(p: &Painter, r: Rect, text: &str) {
-    let t = legend(p, r.left_top(), Align2::LEFT_TOP, text, 9.5, steel::TEXT_3);
+    let t = legend(p, r.left_top(), Align2::LEFT_TOP, text, 9.5, QUIET);
     steel::groove_h(p, t.right() + 8.0, r.right(), t.center().y - 1.0);
 }
 
@@ -139,14 +144,21 @@ pub fn switch_row_asking(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, l
     let resp = key(ui, k, &id, text, on, if asking { steel::AMBER } else { TINT }, usable, value.is_some() && !asking);
     let tip = if value.is_some() { hint } else { "The headphones did not report this setting" };
     let clicked = resp.clicked() || row.clicked();
-    row.on_hover_text(tip);
-    resp.on_hover_text(tip);
+    if asking {
+        // What the second press does is said right at the key, without waiting for a hover.
+        resp.show_tooltip_text(tip);
+    } else {
+        row.on_hover_text(tip);
+        resp.on_hover_text(tip);
+    }
     if clicked { value.map(|v| !v) } else { None }
 }
 
 /// A horizontal fader with `steps + 1` detents. Returns the detent under the cap when
 /// it moves, and whether the hand has let go.
-pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, value: u8, steps: u8, enabled: bool) -> (Option<u8>, bool) {
+pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, reading: Option<u8>, steps: u8, enabled: bool) -> (Option<u8>, bool) {
+    let enabled = enabled && reading.is_some();
+    let value = reading.unwrap_or(0);
     let resp = ui.interact(rect, ui.id().with(id), if enabled { Sense::click_and_drag() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(value), "Sidetone"));
     if resp.clicked() || resp.drag_started() {
@@ -160,7 +172,12 @@ pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, value: u8, st
         p.line_segment([pos2(x, track.bottom() + 5.0), pos2(x, track.bottom() + 8.0)], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.35)));
     }
     let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered() || resp.dragged());
-    steel::fader_track(&p, track, f32::from(value) / f32::from(steps), TINT, hover);
+    if reading.is_some() {
+        steel::fader_track(&p, track, f32::from(value) / f32::from(steps), TINT, hover);
+    } else {
+        // No reading, so no cap: an empty track claims no position.
+        p.rect(track, CornerRadius::same(steel::R_CAP), steel::INK, Stroke::new(1.0, Color32::from_black_alpha(200)), StrokeKind::Outside);
+    }
     let mut out = None;
     if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked()) {
         let frac = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
@@ -656,10 +673,10 @@ pub fn battery_lcd(p: &Painter, rect: Rect, battery: Option<u8>, charging: Optio
 
 /// One line of a facts list: a name at the left, what the headphones reported at the right.
 pub fn fact(p: &Painter, rect: Rect, name: &str, value: Option<&str>) {
-    p.text(rect.left_center(), Align2::LEFT_CENTER, name, mono(11.0), steel::TEXT_3);
+    p.text(rect.left_center(), Align2::LEFT_CENTER, name, mono(11.0), QUIET);
     match value {
         Some(v) => p.text(rect.right_center(), Align2::RIGHT_CENTER, v, mono_bold(11.0), steel::TEXT),
-        None => p.text(rect.right_center(), Align2::RIGHT_CENTER, "not reported", mono(11.0), steel::TEXT_3),
+        None => p.text(rect.right_center(), Align2::RIGHT_CENTER, "not reported", mono(11.0), QUIET),
     };
 }
 
