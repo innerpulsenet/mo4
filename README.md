@@ -42,6 +42,9 @@ testing, which the titlebar labels as such.
 
 The headphones' own five-band equalizer, edited on a graph.
 
+- The labels under the graph say where each band acts, as measured: `<120` and `>5.9k`
+  are shelves that move everything below or above that point. Point at a label for
+  what the band does and what the headphones call it.
 - Drag a node, scroll over a band, or use the arrow keys. Steps are half a dB, a tenth
   with Shift held. Double-click a node to zero it.
 - A lamp says whether the curve is on the headphones, and what the headphones hold is
@@ -68,7 +71,9 @@ The headphones' own five-band equalizer, edited on a graph.
 
 ### Nothing is guessed
 
-Every value on screen is one the headphones reported. A setting they did not report
+Every value on screen is one the headphones reported, with one exception that the
+screen marks: the labels under the equalizer say where each band was
+[measured](#what-the-curves-rest-on) to act. A setting the headphones did not report
 shows as N/A or "not reported". After each change the app reads the value back and says
 whether the headphones confirmed it. The line at the bottom shows what happened last;
 click it for the history.
@@ -84,50 +89,73 @@ the reduced-motion setting of KDE and of Windows.
 
 ## Presets
 
-Gains are in dB for the five bands, lowest first. The headphones report those bands at
-90 Hz, 325 Hz, 1.5 kHz, 6.5 kHz and 6.5 kHz. The last two really are reported the same;
-each still has its own gain, and the window says so when you point at them.
+Gains are in dB for the five bands, lowest first. On these headphones the bands are a
+low shelf below about 120 Hz, bells at 215 Hz, 1.1 kHz and 4.2 kHz, and a high shelf
+above about 5.9 kHz. That is measured; it is not what the headphones report, which is
+90 Hz, 325 Hz, 1.5 kHz and 6.5 kHz twice.
 
 | Group | Preset | Curve | For |
 |---|---|---|---|
 | Tone | Flat | 0 0 0 0 0 | no change |
 | Tone | Warm | +3.0 +1.5 0 -1.5 -1.5 | fuller lows, a softer top |
 | Tone | Bass | +5.0 +1.0 0 0 0 | low-end weight |
-| Tone | Vocal | -2.0 0 +3.0 +1.0 +1.0 | voices forward |
+| Tone | Vocal | -2.0 0 +2.5 +2.0 0 | voices forward, sibilance left alone |
 | Tone | Bright | 0 0 0 +2.0 +2.0 | more treble detail |
 | Tone | Loudness | +4.0 +1.0 -1.0 +2.5 +2.5 | a gentle V for low volume |
-| Tone | Night | -3.0 0 +1.5 +0.5 +0.5 | less bass, clear voices |
+| Tone | Night | -3.0 0 +1.5 +1.0 0 | less bass, clear voices |
 | Music | Post-rock | +1.5 -1.5 0 +1.5 +1.5 | post-rock, dream pop, ambient electronica: depth for pads, a clear wash, a lifted top |
 | Music | Rap | +3.5 -1.0 +0.5 +1.5 +1.0 | sub-bass weight with the voice kept in front |
-| Music | Classic rock | +2.0 +1.0 +1.5 +0.5 +0.5 | body and warmth, guitars forward |
-| Music | Alt rock | +2.5 -1.5 +0.5 +2.0 +1.5 | tight punch, less mud, guitar bite |
+| Music | Classic rock | +2.0 +1.0 +1.5 +1.0 0 | body and warmth, guitars forward, the top left alone |
+| Music | Alt rock | +2.5 -1.5 +0.5 +3.0 +1.0 | tight punch, less mud, guitar bite |
 | Music | Classical | -2.0 -1.0 0 +1.5 +1.5 | less of the stock bass lift, clear strings |
-| Games | Footsteps | -4.0 -1.5 +2.5 +2.5 +2.0 | any shooter without a curve of its own |
-| Games | Hunt: Showdown | -2.0 +0.5 +2.0 +1.0 +1.0 | the gentlest: sound traps, steps on every surface, how far off a shot was |
-| Games | PUBG | -2.5 +1.0 +3.0 +1.5 +1.0 | heavy steps and the direction of a shot, less vehicle rumble |
-| Games | Call of Duty | -4.5 -2.0 +2.0 +3.0 +2.5 | the strongest: steps over explosions and streaks |
-| Games | The Finals | -3.5 -1.0 +2.5 +2.0 +1.5 | steps and gadgets over collapsing buildings |
+| Games | Footsteps | -4.0 -1.5 +2.5 +4.0 +0.5 | any shooter without a curve of its own |
+| Games | Hunt: Showdown | -2.0 +0.5 +2.0 +1.5 0 | the gentlest: sound traps, steps on every surface, how far off a shot was |
+| Games | PUBG | -2.5 +1.0 +3.0 +2.0 0 | heavy steps and the direction of a shot, less vehicle rumble |
+| Games | Call of Duty | -4.5 -2.0 +2.0 +5.0 +1.0 | the strongest: steps over explosions and streaks |
+| Games | The Finals | -3.5 -1.0 +2.5 +3.5 +0.5 | steps and gadgets over collapsing buildings |
 
-These are starting points by ear and by reasoning, not measurements. They assume the
-bass-forward tuning reviewers agree these headphones have, so they add less bass than a
-curve for a neutral headphone would. Change them to taste and keep your own.
+The shapes of the bands are measured; the taste is not. These are starting points by
+ear and by reasoning. They assume the bass-forward tuning reviewers agree these
+headphones have, so they add less bass than a curve for a neutral headphone would.
+Change them to taste and keep your own.
 
 ### What the curves rest on
 
-The headphones say where each band is and how wide (the first is wider than the rest),
-but not what kind of filter it is, and nobody has published a measurement. The last two
-bands may be the same bell twice, or a bell and a shelf. Every built-in curve was
-worked out for both, and for a shelf at each end: it keeps the last two bands within
-half a dB of each other and their sum inside 6 dB, so its shape holds either way and no
-point of it moves by more than about 2 dB between the readings.
+The headphones report a frequency for each band, but that is not where the bands act.
+So they were measured: the headphones played noise into a microphone with one band at
+a time moved, and the change from the flat curve was fitted with standard filters.
+
+![Each band at +6 dB: the measured change and the fitted filter](docs/eq-bands-measured.png)
+
+| Band | Reported | Measured |
+|---|---|---|
+| 1 | 90 Hz | a low shelf, half its effect at about 120 Hz |
+| 2 | 325 Hz | a bell at about 215 Hz |
+| 3 | 1.5 kHz | a wide bell at about 1.1 kHz, felt from 400 Hz to 3 kHz |
+| 4 | 6.5 kHz | a bell at about 4.2 kHz that gives two thirds of what is set: +6 dB makes +3.9 |
+| 5 | 6.5 kHz | a high shelf, half its effect at about 5.9 kHz |
+
+- The bands add up. Two whole presets were recorded as a check, and both came out
+  within half a dB of what the five filters predict.
+- The headphones turn everything down by 1 to 4 dB when a curve boosts, and up a
+  little when it cuts. A boost never sounds as loud as its number.
+
+What this is worth: one pair of M4AEBT SE on firmware 3.38.3 and one microphone
+position, with nothing measured below 40 Hz, so the lowest band could also be a very
+wide bell near 50 Hz (from 40 Hz up the two are the same). MO4 uses these figures only
+for headphones of that model that report that band layout, and marks the graph "bands
+as measured" when it does. The method and the numbers are in
+[docs/PROTOCOL.md](docs/PROTOCOL.md#what-the-bands-do).
 
 The game curves share one idea. Rumble masks the quiet sounds that give a position
-away, and these headphones add bass of their own, so the low band comes down; steps,
-reloads and the cues that place a sound sit from about 1 to 6 kHz, so those bands come
-up. How far each one goes follows the game's mix. Published advice on which frequencies
-carry footsteps disagrees from guide to guide, and no equalizer adds positional cues a
-game did not mix in: use the game's own headphone mode, and don't put a second
-virtual-surround layer on top of it.
+away, and these headphones add bass of their own, so the low shelf comes down; steps,
+reloads and the cues that place a sound sit from about 1 to 5 kHz, so the 1.1 kHz and
+4.2 kHz bells come up. The 4.2 kHz bell gives two thirds of what is set, which is why
+its numbers are the largest. The top shelf stays low: raising it lifts hiss and the
+crack of every shot more than it lifts steps. How far each curve goes follows the
+game's mix. Published advice on which frequencies carry footsteps disagrees from guide
+to guide, and no equalizer adds positional cues a game did not mix in: use the game's
+own headphone mode, and don't put a second virtual-surround layer on top of it.
 
 ## Install
 

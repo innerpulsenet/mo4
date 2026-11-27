@@ -1,6 +1,7 @@
 //! MO4: desktop control for Sennheiser MOMENTUM 4 headphones.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod bands;
 mod cli;
 mod client;
 mod device;

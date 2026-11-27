@@ -309,7 +309,48 @@ hold one curve.
 
 The frequencies the headphones report for the five bands are 90, 325, 1500, 6500 and
 6500 Hz (two sources; yes, the last two are the same). The phone app labels the bands
-63, 250, 1k, 4k and 8k. MO4 shows what the headphones report.
+63, 250, 1k, 4k and 8k. Neither is where the bands act.
+
+#### What the bands do
+
+Measured on 2026-11-26, on the M4AEBT SE with firmware 3.38.3, sound mode 1, over
+aptX HD at 48 kHz. A USB microphone lay inside one ear cup and was not moved. The
+computer played 12 seconds of periodic pink noise (a period of 32768 samples) for each
+curve, and the recording's power spectrum, less the room's, was divided by the mean
+of three recordings of the flat curve. Each band was recorded alone at +6 and at
+-6 dB, and a second-order low shelf, bell and high shelf were fitted to each. Bands
+are numbered from 0 here, as on the wire.
+
+| Band | Reported | Best fit at +6 / -6 dB | Hz | Q | dB at its peak |
+|---|---|---|---|---|---|
+| 0 | 90 Hz | low shelf | 123 / 116 | 0.69 / 0.69 | +5.8 / -6.8 |
+| 1 | 325 Hz | bell | 214 / 219 | 0.79 / 0.82 | +5.5 / -5.7 |
+| 2 | 1500 Hz | bell | 1079 / 1095 | 0.41 / 0.43 | +6.5 / -6.3 |
+| 3 | 6500 Hz | bell | 4224 / 4244 | 0.89 / 0.93 | +3.9 / -3.9 |
+| 4 | 6500 Hz | high shelf | 5917 / 5934 | 0.71 / 0.72 | +6.1 / -6.0 |
+
+The fits miss the recordings by 0.1 to 0.3 dB. `src/bands.rs` holds the rounded
+figures MO4 uses.
+
+- **Band 3 gives two thirds of what is set**, and in proportion: +3 dB made +1.9, and
+  -3 dB made -2.0. Bands 0, 2 and 4 at +3 dB made +3.
+- **The bands add.** Bands 3 and 4 together at +6, band 3 at +6 with band 4 at -6, and
+  two whole five-band curves all came out within 0.5 dB of the sum of the five fitted
+  filters, wherever the microphone heard the headphones well.
+- **The whole signal moves with the curve.** Away from the band that was changed, the
+  level fell by 1.0 dB (band 0 or 1 at +6), 3.2 dB (band 2 or 3 at +6) and 4.0 dB
+  (band 4 at +6), and rose by 0.0 to 1.4 dB for the same cuts. At +3 dB it fell by
+  0.0, 1.2, 1.3 and 1.0 dB for bands 0, 2, 3 and 4. The per-band values in `1091`
+  may be this gain; that has not been checked.
+- **Limits.** One pair, one firmware, one microphone position. The microphone heard
+  the noise 6 to 43 dB above the room, worst from 200 to 350 Hz; three recordings of
+  the flat curve agreed within 0.2 dB above 400 Hz and 1 dB below. Nothing was
+  measured below 40 Hz, where a bell near 50 Hz with a Q of 0.5 to 0.6 fits band 0 as
+  well as the shelf does. A listening test the same day settled nothing.
+
+MO4 labels the bands with the measured figures only when the model starts with
+`M4AEBT` and the reported frequencies are the five above; otherwise it shows what the
+headphones report.
 
 Firmware from 2.12.0 up to 3.18.0 used a different equalizer on the same command
 words (a master gain and four shelves, computed in the app). MO4 does not speak it
@@ -403,6 +444,9 @@ and leaves those command words alone on such firmware.
   asking (`1407`), and still has the name that was on screen. A first attempt sent
   nothing, because the TV had connected on its own and MO4 held the request back.
   What the headphones do when they are already at their limit is not known.
+- **The equalizer's bands have been measured through a microphone** (2026-11-26): 28
+  recordings, each of a curve written with `1001` and read back first. See "What the
+  bands do" under Equalizer. The curve and sound mode found beforehand were put back.
 - **One other setting has been changed on real headphones by trace:** anti-wind,
   auto to max and back, with the single-pair form `1A00 [1, value]`. The headphones
   acknowledged with

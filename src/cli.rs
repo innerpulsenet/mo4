@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use crate::bands;
 use crate::client::Client;
 use crate::device::{self, ANTI_WIND, Device, NoiseMode, PROMPT_MODES, SOUND_MODES, Setting};
 use crate::link::{Target, usb};
@@ -171,26 +172,11 @@ fn connect(target: &Target, trace: bool) -> Result<Client, String> {
 fn eq_line(d: &Device) -> String {
     match (&d.eq_gains, d.eq_supported()) {
         (Some(gains), true) => {
-            let bands: Vec<String> = gains
-                .iter()
-                .enumerate()
-                .map(|(i, g)| {
-                    let label = d.eq_freqs.get(i).copied().flatten().map_or_else(|| format!("band {}", i + 1), hz_label);
-                    format!("{label} {}", device::db_text(*g))
-                })
-                .collect();
+            let labels = bands::labels(d, gains.len());
+            let bands: Vec<String> = gains.iter().zip(&labels).map(|(g, label)| format!("{label} {}", device::db_text(*g))).collect();
             bands.join("   ")
         }
         _ => "not reported (needs firmware 3.18 or newer)".into(),
-    }
-}
-
-pub fn hz_label(hz: u16) -> String {
-    if hz >= 1000 {
-        let k = f32::from(hz) / 1000.0;
-        if (k - k.round()).abs() < 0.05 { format!("{k:.0}k") } else { format!("{k:.1}k") }
-    } else {
-        hz.to_string()
     }
 }
 
@@ -210,6 +196,11 @@ fn print_status(d: &Device, via: &str) {
         row(key, value(d, key));
     }
     row("equalizer", Some(eq_line(d)));
+    if bands::measured(d).is_some() {
+        // The labels above are where the bands were measured to act, not what was reported.
+        let reported: Vec<String> = d.eq_freqs.iter().flatten().map(|hz| bands::hz_label(*hz)).collect();
+        row("equalizer bands", Some(format!("as measured on one pair; the headphones report {}", reported.join(" "))));
+    }
     if !d.paired.is_empty() {
         println!("paired devices");
         for p in &d.paired {
@@ -366,10 +357,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn labels_frequencies() {
-        assert_eq!(hz_label(90), "90");
-        assert_eq!(hz_label(1500), "1.5k");
-        assert_eq!(hz_label(8000), "8k");
-    }
 }

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, CornerRadius, FontFamily, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use crate::cli::hz_label;
+use crate::bands::{self, hz_words};
 use crate::device::{self, ANTI_WIND, AUTO_OFF, NoiseMode, SIDETONE_MAX, Setting};
 use crate::link::Target;
 use crate::link::usb::Cable;
@@ -207,15 +207,6 @@ impl eframe::App for App {
 /// How long a key that wants a second press (Hi-Res, connect) waits for it; the footer
 /// line that explains it lasts as long.
 const ASK_TIME: Duration = Duration::from_secs(6);
-
-/// A frequency in words: "325 Hz", "6.5 kHz".
-fn hz_words(hz: u16) -> String {
-    let label = hz_label(hz);
-    match label.strip_suffix('k') {
-        Some(k) => format!("{k} kHz"),
-        None => format!("{label} Hz"),
-    }
-}
 
 /// Room kept at the right of the foot for the version and the maker's mark; the message
 /// line stops short of it.
@@ -572,9 +563,15 @@ impl App {
             self.send(Setting::EqGains(gains));
         }
 
-        let labels: Vec<String> = (0..bands).map(|i| d.eq_freqs.get(i).copied().flatten().map_or_else(|| format!("band {}", i + 1), hz_label)).collect();
+        let labels = bands::labels(&d, bands);
+        // Where the bands were measured to act, for headphones of the kind that was measured.
+        let measured = bands::measured(&d).filter(|m| m.len() == bands);
+        let spoken: Vec<String> = match measured {
+            Some(m) => m.iter().map(bands::Band::spoken).collect(),
+            None => labels.iter().map(|l| format!("{l} Hz")).collect(),
+        };
         let intro = self.intro(ui.ctx());
-        let view = widgets::EqView { shown: &shown, device: device_curve.as_deref(), labels: &labels, min, max, audible, enabled: usable, intro };
+        let view = widgets::EqView { shown: &shown, device: device_curve.as_deref(), labels: &labels, spoken: &spoken, measured: measured.is_some(), min, max, audible, enabled: usable, intro };
         let ev = widgets::eq_editor(ui, graph, &view, &mut self.band);
         if let Some(curve) = ev.curve {
             self.drag(Setting::EqGains(curve), ev.released);
@@ -595,9 +592,12 @@ impl App {
                 let beside = (band > 0 && hz(band - 1) == Some(here)) || hz(band + 1) == Some(here);
                 beside.then_some(here)
             });
-            self.hint = Some(match twin {
-                Some(hz) => format!("The headphones report {} for this band and its neighbor. Each has its own gain: drag, scroll or use the arrow keys.", hz_words(hz)),
-                None => "Drag a node, scroll over a band, or use the arrow keys. Hold Shift for tenths of a dB. Double-click a node to zero it.".into(),
+            // Over a band's label: what that band does. Over the screen: how to work it.
+            let about = measured.zip(ev.hovered).filter(|_| ev.over_labels).and_then(|(m, band)| m.get(band));
+            self.hint = Some(match (about, twin) {
+                (Some(band), _) => band.words(),
+                (None, Some(hz)) if measured.is_none() => format!("The headphones report {} for this band and its neighbor. Each has its own gain: drag, scroll or use the arrow keys.", hz_words(hz)),
+                _ => "Drag a node, scroll over a band, or use the arrow keys. Hold Shift for tenths of a dB. Double-click a node to zero it.".into(),
             });
         }
 

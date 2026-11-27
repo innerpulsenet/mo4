@@ -438,6 +438,11 @@ pub struct EqView<'a> {
     /// What the headphones hold, when it differs from what is shown.
     pub device: Option<&'a [i8]>,
     pub labels: &'a [String],
+    /// Each band as a screen reader should say it.
+    pub spoken: &'a [String],
+    /// Whether the labels are where the bands were measured to act, which the screen
+    /// then says, or only what the headphones report.
+    pub measured: bool,
     pub min: i8,
     pub max: i8,
     /// Whether the curve is being heard (sound mode is equalizer).
@@ -452,6 +457,8 @@ pub struct EqEvent {
     pub released: bool,
     /// The band whose column the pointer is over.
     pub hovered: Option<usize>,
+    /// Whether the pointer is over the row of band labels under the screen's plot.
+    pub over_labels: bool,
 }
 
 /// The equalizer: a screen sunk into the plate with one node per band. Drag a node,
@@ -461,7 +468,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
     let p = ui.painter().clone();
     steel::well(&p, rect, Some(TINT));
     let n = view.shown.len();
-    let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()), hovered: None };
+    let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()), hovered: None, over_labels: false };
     if n == 0 {
         return event;
     }
@@ -486,6 +493,11 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
     }
     p.text(pos2(plot.left() - 8.0, rect.top() + 9.0), Align2::RIGHT_CENTER, "dB", mono(9.0), steel::TEXT_3);
     p.text(pos2(rect.right() - 9.0, rect.bottom() - 15.0), Align2::RIGHT_CENTER, "Hz", mono(9.0), steel::TEXT_3);
+    if view.measured {
+        // The labels are not the headphones' own numbers, so the screen says whose they are.
+        p.text(pos2(rect.right() - 9.0, rect.top() + 8.0), Align2::RIGHT_CENTER, "bands as measured", mono(9.0), steel::TEXT_3);
+    }
+    event.over_labels = ui.input(|i| i.pointer.hover_pos()).is_some_and(|at| rect.contains(at) && at.y > plot.bottom() + 4.0);
 
     if !view.enabled {
         // No curve is drawn without a reading: the screen stays dark.
@@ -543,8 +555,8 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         if resp.hovered() {
             event.hovered = Some(band);
         }
-        let name = view.labels.get(band).cloned().unwrap_or_default();
-        resp.widget_info(|| egui::WidgetInfo::slider(view.enabled, f64::from(view.shown[band]) / 10.0, format!("Equalizer band {name} Hz, dB")));
+        let name = view.spoken.get(band).cloned().unwrap_or_default();
+        resp.widget_info(|| egui::WidgetInfo::slider(view.enabled, f64::from(view.shown[band]) / 10.0, format!("Equalizer band, {name}, dB")));
         keep_arrows(ui, &resp, false, true);
         if view.enabled {
             if resp.drag_started() || resp.clicked() {
@@ -607,7 +619,8 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
             vec2(19.0, -12.0)
         };
         let mut label_at = at + offset;
-        if label_at.y < plot.top() - 8.0 {
+        // Clear of the top edge, and of the note that sits there.
+        if label_at.y < plot.top() - if view.measured { 2.0 } else { 8.0 } {
             label_at.y = at.y + 15.0;
         }
         if label_at.y > plot.bottom() + 6.0 {
