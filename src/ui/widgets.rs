@@ -7,7 +7,9 @@ use std::hash::Hash;
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, CornerRadius, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
+use super::look;
 use super::steel::{self, KeyState, LampShape};
+use crate::bands::{self, Band};
 
 /// What is lit in this app, and the second tint for the transparency side of the dial.
 pub const TINT: Color32 = steel::VIOLET;
@@ -48,31 +50,24 @@ pub fn legend(p: &Painter, pos: Pos2, anchor: Align2, text: &str, size: f32, col
     );
     let galley = p.layout_job(job);
     let rect = anchor.anchor_size(pos, galley.size());
-    steel::paint_engraved(p, rect.min, galley, color);
+    look::paint_engraved(p, rect.min, galley, color);
     rect
 }
 
 /// A section: a groove cut around part of the plate, with its name at the top left
 /// behind an ember tick. Returns the area left for its contents.
-/// Small legends and labels on the steel plate. The brand's dimmest text gray falls
-/// short of 4.5:1 on the brushed plate at these sizes; this is that gray raised until
-/// it clears it. On the dark wells the brand gray is used as it is.
-pub const QUIET: Color32 = Color32::from_rgb(0xac, 0xb1, 0xb7);
-
 pub fn section(p: &Painter, r: Rect, title: &str) -> Rect {
-    let cr = CornerRadius::same(steel::R_GLASS);
-    p.rect_stroke(r, cr, Stroke::new(1.0, Color32::from_black_alpha(150)), StrokeKind::Inside);
-    p.rect_stroke(r.shrink(1.0), cr, Stroke::new(1.0, Color32::from_white_alpha(steel::LIP_SOFT)), StrokeKind::Inside);
+    look::section_frame(p, r);
     let tick = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(2.0, 9.0));
-    p.rect_filled(tick, CornerRadius::same(1), steel::EMBER);
-    legend(p, r.min + vec2(22.0, 13.0), Align2::LEFT_TOP, title, 10.0, QUIET);
+    p.rect_filled(tick, CornerRadius::same(1), look::mark());
+    legend(p, r.min + vec2(22.0, 13.0), Align2::LEFT_TOP, title, 10.0, look::quiet());
     Rect::from_min_max(r.min + vec2(14.0, 36.0), r.max - vec2(14.0, 14.0))
 }
 
 /// A small caption over a group of controls, with a groove running out to the right.
 pub fn caption(p: &Painter, r: Rect, text: &str) {
-    let t = legend(p, r.left_top(), Align2::LEFT_TOP, text, 9.5, QUIET);
-    steel::groove_h(p, t.right() + 8.0, r.right(), t.center().y - 1.0);
+    let t = legend(p, r.left_top(), Align2::LEFT_TOP, text, 9.5, look::quiet());
+    look::groove_h(p, t.right() + 8.0, r.right(), t.center().y - 1.0);
 }
 
 fn key_state(ui: &Ui, resp: &Response, on: bool, tint: Color32) -> KeyState {
@@ -93,7 +88,7 @@ pub fn key(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &str, on
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, label));
     let p = painter(ui, enabled);
     let k = key_state(ui, &resp, on, tint);
-    steel::key_body(&p, rect, CornerRadius::same(steel::R_KEY), k);
+    look::key_body(&p, rect, CornerRadius::same(steel::R_KEY), k);
     let galley = p.layout_no_wrap(label.to_owned(), mono_bold(10.5), Color32::PLACEHOLDER);
     let lamp_w = if lamp { 14.0 } else { 0.0 };
     let left = rect.center().x - (galley.size().x + lamp_w) / 2.0;
@@ -101,7 +96,7 @@ pub fn key(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &str, on
         steel::lamp(&p, pos2(left + 4.0, rect.center().y + k.press), 3.2, tint, k.on, LampShape::Round);
     }
     let at = pos2(left + lamp_w, rect.center().y - galley.size().y / 2.0 + k.press);
-    p.galley_with_override_text_color(at, galley, steel::key_text(k, enabled));
+    p.galley_with_override_text_color(at, galley, look::key_text(k, enabled));
     resp
 }
 
@@ -130,7 +125,7 @@ pub fn switch_row(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &
 #[allow(clippy::too_many_arguments)]
 pub fn switch_row_asking(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, label: &str, hint: &str, value: Option<bool>, enabled: bool, asking: bool) -> Option<bool> {
     let p = painter(ui, enabled && value.is_some());
-    p.text(rect.left_center(), Align2::LEFT_CENTER, label, sans(12.5), steel::TEXT);
+    p.text(rect.left_center(), Align2::LEFT_CENTER, label, sans(12.5), look::text());
     let k = Rect::from_min_max(pos2(rect.right() - 62.0, rect.center().y - 11.0), pos2(rect.right(), rect.center().y + 11.0));
     let (text, on) = match value {
         _ if asking => ("REALLY?", true),
@@ -169,7 +164,7 @@ pub fn fader(ui: &Ui, rect: Rect, id: impl Hash + std::fmt::Debug, reading: Opti
     let track = Rect::from_min_max(pos2(rect.left() + 6.0, rect.center().y - 3.0), pos2(rect.right() - 6.0, rect.center().y + 3.0));
     for i in 0..=steps {
         let x = track.left() + track.width() * f32::from(i) / f32::from(steps);
-        p.line_segment([pos2(x, track.bottom() + 5.0), pos2(x, track.bottom() + 8.0)], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.35)));
+        p.line_segment([pos2(x, track.bottom() + 5.0), pos2(x, track.bottom() + 8.0)], Stroke::new(1.0, look::line(0.35)));
     }
     let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered() || resp.dragged());
     if reading.is_some() {
@@ -247,13 +242,15 @@ pub fn noise_dial(ui: &Ui, rect: Rect, level: Option<u8>, enabled: bool, idle_wo
     // The scale: a tick and a figure every quarter, strength rising away from the top.
     for (t, figure) in [(0.0, "100"), (0.25, "50"), (0.5, "0"), (0.75, "50"), (1.0, "100")] {
         let a = angle_of(t);
-        p.line_segment([polar(c, outer + 3.0, a), polar(c, outer + 7.0, a)], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.45)));
-        p.text(polar(c, outer + 16.0, a), Align2::CENTER_CENTER, figure, mono_bold(8.5), steel::lerp(steel::TEXT_3, side(t), 0.45));
+        p.line_segment([polar(c, outer + 3.0, a), polar(c, outer + 7.0, a)], Stroke::new(1.0, look::line(0.45)));
+        // The scale is written on the plate: the top is plain, each side leans to its tint.
+        let ink = if (t - 0.5f32).abs() < 0.01 { steel::lerp(look::text_3(), look::text(), 0.45) } else { look::tinted(side(t), 0.45) };
+        p.text(polar(c, outer + 16.0, a), Align2::CENTER_CENTER, figure, mono_bold(8.5), ink);
     }
     for k in 1..24 {
         if k % 6 != 0 {
             let a = angle_of(k as f32 / 24.0);
-            p.line_segment([polar(c, outer + 3.0, a), polar(c, outer + 5.0, a)], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.20)));
+            p.line_segment([polar(c, outer + 3.0, a), polar(c, outer + 5.0, a)], Stroke::new(1.0, look::line(0.20)));
         }
     }
 
@@ -419,17 +416,24 @@ fn smooth(pts: &[Pos2]) -> Vec<Pos2> {
     out
 }
 
-/// A preset's curve as a small trace.
-pub fn spark(p: &Painter, rect: Rect, gains: &[i8], color: Color32) {
+/// A preset's curve as a small trace: what the bands add up to where they have been
+/// measured, otherwise a line through the gains.
+pub fn spark(p: &Painter, rect: Rect, gains: &[i8], measured: Option<&[Band]>, color: Color32) {
     if gains.len() < 2 {
         return;
     }
-    let pts: Vec<Pos2> = gains
-        .iter()
-        .enumerate()
-        .map(|(i, g)| pos2(rect.left() + rect.width() * i as f32 / (gains.len() - 1) as f32, rect.center().y - f32::from(*g) / 60.0 * rect.height() / 2.0))
-        .collect();
-    p.add(egui::Shape::line(smooth(&pts), Stroke::new(1.25, color)));
+    let y_of = |db: f32| rect.center().y - (db / 6.0).clamp(-1.0, 1.0) * rect.height() / 2.0;
+    let line = match measured.filter(|b| b.len() == gains.len()) {
+        Some(b) => {
+            let db: Vec<f32> = gains.iter().map(|g| f32::from(*g) / 10.0).collect();
+            (0..=16).map(|i| pos2(rect.left() + rect.width() * i as f32 / 16.0, y_of(bands::response(b, &db, bands::hz_at(i as f32 / 16.0))))).collect()
+        }
+        None => {
+            let pts: Vec<Pos2> = gains.iter().enumerate().map(|(i, g)| pos2(rect.left() + rect.width() * i as f32 / (gains.len() - 1) as f32, y_of(f32::from(*g) / 10.0))).collect();
+            smooth(&pts)
+        }
+    };
+    p.add(egui::Shape::line(line, Stroke::new(1.25, color)));
 }
 
 pub struct EqView<'a> {
@@ -440,9 +444,10 @@ pub struct EqView<'a> {
     pub labels: &'a [String],
     /// Each band as a screen reader should say it.
     pub spoken: &'a [String],
-    /// Whether the labels are where the bands were measured to act, which the screen
-    /// then says, or only what the headphones report.
-    pub measured: bool,
+    /// What each band was measured to do, for headphones of the kind that was measured.
+    /// With it the screen draws what the bands add up to over frequency; without it,
+    /// one evenly spaced node per band under the frequency the headphones report.
+    pub bands: Option<&'a [Band]>,
     pub min: i8,
     pub max: i8,
     /// Whether the curve is being heard (sound mode is equalizer).
@@ -457,53 +462,87 @@ pub struct EqEvent {
     pub released: bool,
     /// The band whose column the pointer is over.
     pub hovered: Option<usize>,
-    /// Whether the pointer is over the row of band labels under the screen's plot.
-    pub over_labels: bool,
+    /// The band the pointer is asking about: it is on that band's node, or on the axis
+    /// under the plot in that band's column.
+    pub about: Option<usize>,
 }
+
+/// The frequencies marked along the screen when it has a frequency axis.
+const TICKS: [u16; 8] = [50, 100, 200, 500, 1000, 2000, 5000, 10000];
 
 /// The equalizer: a screen sunk into the plate with one node per band. Drag a node,
 /// scroll over a band, or use the arrow keys; double-click a node to zero it. Steps
 /// are half a dB, a tenth with Shift held.
+///
+/// For headphones whose bands have been measured the screen is a frequency response:
+/// the curve is what the five bands add up to from 40 Hz to 18 kHz, and each node
+/// stands at its band's frequency, at the gain set on that band. The curve and a node
+/// part ways wherever a band gives less than is set or its neighbors add to it.
 pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize>) -> EqEvent {
     let p = ui.painter().clone();
-    steel::well(&p, rect, Some(TINT));
+    look::well(&p, rect, Some(TINT));
     let n = view.shown.len();
-    let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()), hovered: None, over_labels: false };
+    let mut event = EqEvent { curve: None, released: !ui.input(|i| i.pointer.primary_down()), hovered: None, about: None };
     if n == 0 {
         return event;
     }
     let plot = Rect::from_min_max(rect.min + vec2(40.0, 22.0), rect.max - vec2(18.0, 30.0));
     let (lo, hi) = (f32::from(view.min), f32::from(view.max));
-    let y_of = |tenths: f32| plot.bottom() - (tenths - lo) / (hi - lo) * plot.height();
-    let x_of = |band: usize| plot.left() + plot.width() * (band as f32 + 0.5) / n as f32;
+    let measured = view.bands.filter(|b| b.len() == n);
+    // Bands overlap, so their sum passes what one band can do: the screen shows as far
+    // as the sum can get, and the nodes keep to the range of a band.
+    let (floor, ceiling) = match measured {
+        Some(b) => {
+            let most = (bands::reach(b, hi.max(-lo) / 10.0) / 2.0).ceil() * 20.0;
+            (-most, most)
+        }
+        None => (lo, hi),
+    };
+    let y_of = |tenths: f32| plot.bottom() - (tenths - floor) / (ceiling - floor) * plot.height();
+    let x_hz = |hz: f32| plot.left() + plot.width() * bands::place(hz);
+    let xs: Vec<f32> = match measured {
+        Some(b) => b.iter().map(|band| x_hz(band.hz)).collect(),
+        None => (0..n).map(|band| plot.left() + plot.width() * (band as f32 + 0.5) / n as f32).collect(),
+    };
+    // Each band takes the pointer from halfway to its neighbors.
+    let edge = |i: usize| if i == 0 { plot.left() } else if i == n { plot.right() } else { (xs[i - 1] + xs[i]) / 2.0 };
     let color = if view.audible && view.enabled { TINT } else { steel::TEXT_3 };
 
     // Graticule: a line every 2 dB, the zero line heavier.
-    let mut db = (view.min as i32 / 20) * 20;
-    while db <= i32::from(view.max) {
+    let mut db = floor as i32;
+    while db <= ceiling as i32 {
         let y = steel::px(ui.ctx(), y_of(db as f32));
         let zero = db == 0;
         p.line_segment([pos2(plot.left(), y), pos2(plot.right(), y)], Stroke::new(1.0, steel::alpha(steel::TEXT, if zero && view.enabled { 0.30 } else { 0.07 })));
         p.text(pos2(plot.left() - 8.0, y), Align2::RIGHT_CENTER, if zero { "0".to_string() } else { format!("{:+}", db / 10) }, mono(10.0), steel::TEXT_3);
         db += 20;
     }
-    for band in 0..n {
-        let x = steel::px(ui.ctx(), x_of(band));
-        p.line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.07)));
+    let axis_y = rect.bottom() - 15.0;
+    if measured.is_some() {
+        // A frequency axis: the same marks whatever the bands are.
+        for hz in TICKS {
+            let x = steel::px(ui.ctx(), x_hz(f32::from(hz)));
+            p.line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.07)));
+            p.text(pos2(x, axis_y), Align2::CENTER_CENTER, bands::hz_label(hz), mono(10.5), steel::alpha(steel::TEXT_3, if view.enabled { 1.0 } else { 0.6 }));
+        }
+        // The curve is worked out from a measurement, so the screen says so.
+        p.text(pos2(rect.right() - 9.0, rect.top() + 8.0), Align2::RIGHT_CENTER, "bands as measured", mono(9.0), steel::TEXT_3);
+    } else {
+        for x in &xs {
+            let x = steel::px(ui.ctx(), *x);
+            p.line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], Stroke::new(1.0, steel::alpha(steel::TEXT, 0.07)));
+        }
     }
     p.text(pos2(plot.left() - 8.0, rect.top() + 9.0), Align2::RIGHT_CENTER, "dB", mono(9.0), steel::TEXT_3);
-    p.text(pos2(rect.right() - 9.0, rect.bottom() - 15.0), Align2::RIGHT_CENTER, "Hz", mono(9.0), steel::TEXT_3);
-    if view.measured {
-        // The labels are not the headphones' own numbers, so the screen says whose they are.
-        p.text(pos2(rect.right() - 9.0, rect.top() + 8.0), Align2::RIGHT_CENTER, "bands as measured", mono(9.0), steel::TEXT_3);
-    }
-    event.over_labels = ui.input(|i| i.pointer.hover_pos()).is_some_and(|at| rect.contains(at) && at.y > plot.bottom() + 4.0);
+    p.text(pos2(rect.right() - 9.0, axis_y), Align2::RIGHT_CENTER, "Hz", mono(9.0), steel::TEXT_3);
 
     if !view.enabled {
         // No curve is drawn without a reading: the screen stays dark.
-        for band in 0..n {
-            if let Some(label) = view.labels.get(band) {
-                p.text(pos2(x_of(band), rect.bottom() - 15.0), Align2::CENTER_CENTER, label, mono(10.5), steel::alpha(steel::TEXT_3, 0.6));
+        if measured.is_none() {
+            for (band, x) in xs.iter().enumerate() {
+                if let Some(label) = view.labels.get(band) {
+                    p.text(pos2(*x, axis_y), Align2::CENTER_CENTER, label, mono(10.5), steel::alpha(steel::TEXT_3, 0.6));
+                }
             }
         }
         p.text(plot.center(), Align2::CENTER_CENTER, "NO READING", mono_bold(11.0), steel::alpha(steel::TEXT_3, 0.8));
@@ -511,12 +550,27 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
     }
 
     let rise = view.intro.clamp(0.0, 1.0);
-    let node = |gains: &[i8]| -> Vec<Pos2> { gains.iter().enumerate().map(|(i, g)| pos2(x_of(i), y_of(f32::from(*g) * rise))).collect() };
+    let node = |gains: &[i8]| -> Vec<Pos2> { gains.iter().zip(&xs).map(|(g, x)| pos2(*x, y_of(f32::from(*g) * rise))).collect() };
     let trace = |gains: &[i8]| -> Vec<Pos2> {
-        let mut pts = vec![pos2(plot.left(), y_of(f32::from(gains[0]) * rise))];
-        pts.extend(node(gains));
-        pts.push(pos2(plot.right(), y_of(f32::from(gains[n - 1]) * rise)));
-        smooth(&pts)
+        match measured {
+            Some(b) => {
+                // What the bands add up to, a point every few pixels across the screen.
+                let db: Vec<f32> = gains.iter().map(|g| f32::from(*g) / 10.0 * rise).collect();
+                let steps = (plot.width() / 3.0).ceil().max(2.0) as usize;
+                (0..=steps)
+                    .map(|i| {
+                        let t = i as f32 / steps as f32;
+                        pos2(plot.left() + plot.width() * t, y_of(bands::response(b, &db, bands::hz_at(t)) * 10.0))
+                    })
+                    .collect()
+            }
+            None => {
+                let mut pts = vec![pos2(plot.left(), y_of(f32::from(gains[0]) * rise))];
+                pts.extend(node(gains));
+                pts.push(pos2(plot.right(), y_of(f32::from(gains[n - 1]) * rise)));
+                smooth(&pts)
+            }
+        }
     };
 
     // What the headphones hold, dashed behind the edit until the two agree.
@@ -539,7 +593,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         }
     }
     p.add(egui::Shape::mesh(mesh));
-    p.add(egui::Shape::line(line, Stroke::new(2.0, color)));
+    p.add(egui::Shape::line(line.clone(), Stroke::new(2.0, color)));
 
     // One column per band takes the pointer.
     let ctx = ui.ctx();
@@ -548,8 +602,33 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
     let snap = |tenths: f32| ((tenths / step).round() * step).clamp(lo, hi) as i8;
     let mut curve = view.shown.to_vec();
     let nodes = node(view.shown);
+    let figure_text = |tenths: i8| if tenths == 0 { "0".to_string() } else { format!("{:+.1}", f32::from(tenths) / 10.0) };
+    // On a frequency axis the nodes stand where their bands are, some of them close
+    // together and none of them on a grid. Each figure takes the first place around
+    // its node that is clear of the curve, the stems, the nodes and the figures
+    // already placed, trying the side away from the zero line first.
+    let mut placed: Vec<Rect> = Vec::with_capacity(n);
+    if measured.is_some() {
+        let room = Rect::from_min_max(pos2(plot.left() - 2.0, rect.top() + 16.0), pos2(rect.right() - 4.0, plot.bottom() + 2.0));
+        for band in 0..n {
+            let size = p.layout_no_wrap(figure_text(view.shown[band]), mono_bold(10.5), Color32::WHITE).size() + vec2(6.0, 0.0);
+            let (at, side) = (nodes[band], 12.0 + size.x / 2.0);
+            let out = if view.shown[band] < 0 { 1.0 } else { -1.0 };
+            let tries = [vec2(0.0, 14.5 * out), vec2(side, 12.0 * out), vec2(-side, 12.0 * out), vec2(side, 0.0), vec2(-side, 0.0), vec2(side, -12.0 * out), vec2(-side, -12.0 * out), vec2(0.0, -14.5 * out), vec2(0.0, 27.0 * out)];
+            let clear = |r: &Rect| {
+                let wide = r.expand(3.0);
+                room.contains_rect(*r)
+                    && !line.iter().any(|pt| wide.contains(*pt))
+                    && !nodes.iter().any(|node| r.expand(8.0).contains(*node))
+                    && !nodes.iter().any(|node| wide.x_range().contains(node.x) && wide.bottom() > node.y.min(zero_y) && wide.top() < node.y.max(zero_y))
+                    && !placed.iter().any(|other| other.expand(2.0).intersects(*r))
+            };
+            let spot = tries.iter().map(|offset| Rect::from_center_size(at + *offset, size)).find(clear).unwrap_or_else(|| Rect::from_center_size(at + tries[0], size));
+            placed.push(spot);
+        }
+    }
     for band in 0..n {
-        let col = Rect::from_min_max(pos2(plot.left() + plot.width() * band as f32 / n as f32, rect.top() + 4.0), pos2(plot.left() + plot.width() * (band + 1) as f32 / n as f32, rect.bottom() - 4.0));
+        let col = Rect::from_min_max(pos2(edge(band), rect.top() + 4.0), pos2(edge(band + 1), rect.bottom() - 4.0));
         let resp = ui.interact(col, ui.id().with(("eq-band", band)), if view.enabled { Sense::click_and_drag() } else { Sense::hover() });
         let hot = resp.hovered() || resp.dragged();
         if resp.hovered() {
@@ -566,7 +645,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
                 *selected = Some(band);
             }
             if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged()) {
-                let tenths = lo + (plot.bottom() - pos.y) / plot.height() * (hi - lo);
+                let tenths = floor + (plot.bottom() - pos.y) / plot.height() * (ceiling - floor);
                 curve[band] = snap(tenths);
             }
             if resp.double_clicked() {
@@ -595,6 +674,23 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         let grow = ctx.animate_bool(resp.id.with("hot"), hot);
         let chosen = *selected == Some(band) && view.enabled;
         let at = nodes[band];
+        let here = view.shown[band];
+        if let Some(b) = measured {
+            // The band on its own, while it is pointed at or chosen: its share of the curve.
+            let show = grow.max(if chosen { 0.6 } else { 0.0 });
+            if show > 0.0 && here != 0 {
+                let steps = (plot.width() / 4.0).ceil().max(2.0) as usize;
+                let own: Vec<Pos2> = (0..=steps)
+                    .map(|i| {
+                        let t = i as f32 / steps as f32;
+                        pos2(plot.left() + plot.width() * t, y_of(b[band].db_at(f32::from(here) / 10.0 * rise, bands::hz_at(t)) * 10.0))
+                    })
+                    .collect();
+                p.add(egui::Shape::line(own, Stroke::new(1.0, steel::alpha(Color32::WHITE, 0.38 * show))));
+            }
+            // A stem from the zero line: the node is the setting, the curve is the result.
+            p.line_segment([pos2(at.x, zero_y), at], Stroke::new(1.0, steel::alpha(color, 0.30 + 0.30 * show)));
+        }
         if chosen || grow > 0.0 {
             let halo: Vec<Pos2> = (0..16).map(|k| polar(at, 15.0, k as f32 / 16.0 * TAU)).collect();
             steel::radial_fan(&p, at, &halo, steel::alpha(color, 0.30 * grow.max(if chosen { 0.6 } else { 0.0 })), steel::alpha(color, 0.0));
@@ -604,37 +700,46 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
         if resp.has_focus() {
             p.circle_stroke(at, 10.0, Stroke::new(1.0, steel::EMBER));
         }
-        // The figure sits where the curve is not: over a peak, under a dip, and on the
-        // outside of a slope.
-        let here = view.shown[band];
-        let before = if band == 0 { here } else { view.shown[band - 1] };
-        let after = if band + 1 == n { here } else { view.shown[band + 1] };
-        let offset = if before > here && after > here {
-            vec2(0.0, 15.0)
-        } else if (before <= here && after <= here) || band == 0 || band + 1 == n {
-            vec2(0.0, -14.0)
-        } else if after > here {
-            vec2(-19.0, -12.0)
-        } else {
-            vec2(19.0, -12.0)
+        let figure = p.layout_no_wrap(figure_text(here), mono_bold(10.5), if chosen || hot { steel::TEXT } else { steel::TEXT_2 });
+        let figure_rect = match placed.get(band) {
+            Some(spot) => Align2::CENTER_CENTER.anchor_size(spot.center(), figure.size()),
+            None => {
+                // Evenly spaced nodes with a line through them: the figure sits where the
+                // line is not, over a peak, under a dip, and on the outside of a slope.
+                let before = if band == 0 { here } else { view.shown[band - 1] };
+                let after = if band + 1 == n { here } else { view.shown[band + 1] };
+                let offset = if before > here && after > here {
+                    vec2(0.0, 15.0)
+                } else if (before <= here && after <= here) || band == 0 || band + 1 == n {
+                    vec2(0.0, -14.0)
+                } else if after > here {
+                    vec2(-19.0, -12.0)
+                } else {
+                    vec2(19.0, -12.0)
+                };
+                let mut label_at = at + offset;
+                if label_at.y < plot.top() - 8.0 {
+                    label_at.y = at.y + 15.0;
+                }
+                if label_at.y > plot.bottom() + 6.0 {
+                    label_at.y = at.y - 14.0;
+                }
+                Align2::CENTER_CENTER.anchor_size(label_at, figure.size())
+            }
         };
-        let mut label_at = at + offset;
-        // Clear of the top edge, and of the note that sits there.
-        if label_at.y < plot.top() - if view.measured { 2.0 } else { 8.0 } {
-            label_at.y = at.y + 15.0;
-        }
-        if label_at.y > plot.bottom() + 6.0 {
-            label_at.y = at.y - 14.0;
-        }
-        let value = f32::from(here) / 10.0;
-        let figure = p.layout_no_wrap(if value == 0.0 { "0".to_string() } else { format!("{value:+.1}") }, mono_bold(10.5), if chosen || hot { steel::TEXT } else { steel::TEXT_2 });
-        let figure_rect = Align2::CENTER_CENTER.anchor_size(label_at, figure.size());
         // A dark tab under the figure keeps it clear of the graticule and the fill.
         p.rect_filled(figure_rect.expand2(vec2(3.0, 0.0)), CornerRadius::same(steel::R_CAP), steel::alpha(steel::INK, 0.82));
         p.galley(figure_rect.min, figure, Color32::WHITE);
-        if let Some(label) = view.labels.get(band) {
-            p.text(pos2(at.x, rect.bottom() - 15.0), Align2::CENTER_CENTER, label, if chosen { mono_bold(10.5) } else { mono(10.5) }, if chosen { steel::TEXT } else { steel::TEXT_3 });
+        if measured.is_none()
+            && let Some(label) = view.labels.get(band)
+        {
+            p.text(pos2(at.x, axis_y), Align2::CENTER_CENTER, label, if chosen { mono_bold(10.5) } else { mono(10.5) }, if chosen { steel::TEXT } else { steel::TEXT_3 });
         }
+    }
+    if let (Some(band), Some(at)) = (event.hovered, ctx.input(|i| i.pointer.hover_pos())) {
+        let on_axis = at.y > plot.bottom() + 4.0;
+        let on_node = nodes[band].distance(at) < 14.0;
+        event.about = (on_axis || on_node).then_some(band);
     }
     if curve != view.shown {
         event.curve = Some(curve);
@@ -645,7 +750,7 @@ pub fn eq_editor(ui: &Ui, rect: Rect, view: &EqView, selected: &mut Option<usize
 /// The battery readout: a dark screen with an amber figure and a row of cells. With no
 /// reading it stays dark and says so.
 pub fn battery_lcd(p: &Painter, rect: Rect, battery: Option<u8>, charging: Option<u8>) {
-    steel::well(p, rect, Some(steel::AMBER));
+    look::well(p, rect, Some(steel::AMBER));
     p.text(rect.min + vec2(12.0, 10.0), Align2::LEFT_TOP, "BATTERY", mono_bold(8.5), steel::alpha(steel::AMBER, 0.75));
     let cells = Rect::from_min_max(pos2(rect.left() + 12.0, rect.bottom() - 17.0), pos2(rect.right() - 12.0, rect.bottom() - 10.0));
     let count = 20;
@@ -682,14 +787,16 @@ pub fn battery_lcd(p: &Painter, rect: Rect, battery: Option<u8>, charging: Optio
     };
     let t = p.text(pos2(rect.right() - 12.0, rect.top() + 14.0), Align2::RIGHT_CENTER, word, mono_bold(9.0), steel::TEXT_2);
     steel::lamp(p, pos2(t.left() - 9.0, rect.top() + 14.0), 3.2, color, lit, shape);
+    // A readout that is glanced at sits behind a pane of glass.
+    look::sheen(p, rect);
 }
 
 /// One line of a facts list: a name at the left, what the headphones reported at the right.
 pub fn fact(p: &Painter, rect: Rect, name: &str, value: Option<&str>) {
-    p.text(rect.left_center(), Align2::LEFT_CENTER, name, mono(11.0), QUIET);
+    p.text(rect.left_center(), Align2::LEFT_CENTER, name, mono(11.0), look::quiet());
     match value {
-        Some(v) => p.text(rect.right_center(), Align2::RIGHT_CENTER, v, mono_bold(11.0), steel::TEXT),
-        None => p.text(rect.right_center(), Align2::RIGHT_CENTER, "not reported", mono(11.0), QUIET),
+        Some(v) => p.text(rect.right_center(), Align2::RIGHT_CENTER, v, mono_bold(11.0), look::text()),
+        None => p.text(rect.right_center(), Align2::RIGHT_CENTER, "not reported", mono(11.0), look::quiet()),
     };
 }
 
@@ -712,12 +819,33 @@ pub fn chip(p: &Painter, right: Pos2, text: &str, lamp: Option<(Color32, LampSha
     let w = g.size().x + lamp_w + 20.0;
     let r = Rect::from_min_max(pos2(right.x - w, right.y - 12.0), pos2(right.x, right.y + 12.0));
     p.rect(r, CornerRadius::same(steel::R_KEY), steel::INK, Stroke::new(1.0, Color32::from_black_alpha(200)), StrokeKind::Outside);
-    p.line_segment([r.left_bottom() + vec2(3.0, 1.5), r.right_bottom() + vec2(-3.0, 1.5)], Stroke::new(1.0, Color32::from_white_alpha(steel::LIP)));
+    p.line_segment([r.left_bottom() + vec2(3.0, 1.5), r.right_bottom() + vec2(-3.0, 1.5)], Stroke::new(1.0, look::lip()));
     if let Some((color, shape, lit)) = lamp {
         steel::lamp(p, pos2(r.left() + 13.0, r.center().y), 3.2, color, lit, shape);
     }
     p.galley(pos2(r.left() + 10.0 + lamp_w, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
     r
+}
+
+/// The key that changes the plate: a small disc, half brushed steel and half bare
+/// aluminum, with the half in use at the upper left.
+pub fn ground_key(ui: &Ui, rect: Rect) -> Response {
+    let now = look::ground();
+    let resp = ui.interact(rect, ui.id().with("ground-key"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Plate: {}. Press to change it", if now == look::Ground::Steel { "brushed steel" } else { "bare aluminum" })));
+    let p = ui.painter();
+    let k = key_state(ui, &resp, false, TINT);
+    look::key_body(p, rect, CornerRadius::same(steel::R_KEY), k);
+    let c = rect.center() + vec2(0.0, k.press);
+    let r = 6.0;
+    let half = |from: f32| -> Vec<Pos2> { (0..=12).map(|i| polar(c, r, from + i as f32 / 12.0 * PI)).collect() };
+    let (dark, pale) = (steel::lerp(steel::PLATE, Color32::BLACK, 0.25), Color32::from_rgb(0xe4, 0xe6, 0xe9));
+    let (upper, lower) = if now == look::Ground::Steel { (dark, pale) } else { (pale, dark) };
+    // Split along the diagonal: the upper left half, then the lower right.
+    p.add(egui::Shape::convex_polygon(half(PI * 0.75), upper, Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(half(PI * 1.75), lower, Stroke::NONE));
+    p.circle_stroke(c, r, Stroke::new(1.0, Color32::from_black_alpha(190)));
+    resp
 }
 
 /// A titlebar window key with a drawn glyph: 0 minimize, 1 maximize, 2 close.
@@ -726,11 +854,12 @@ pub fn window_key(ui: &Ui, rect: Rect, which: u8) -> Response {
     let p = ui.painter();
     let hover = ui.ctx().animate_bool(resp.id.with("hover"), resp.hovered());
     if hover > 0.0 {
-        let fill = if which == 2 { steel::alpha(steel::ACTION, 0.85 * hover) } else { Color32::from_white_alpha((18.0 * hover) as u8) };
+        let fill = if which == 2 { steel::alpha(steel::ACTION, 0.85 * hover) } else { look::wash(0.07 * hover) };
         p.rect_filled(rect, CornerRadius::same(steel::R_KEY), fill);
     }
     let c = rect.center();
-    let ink = Stroke::new(1.2, steel::lerp(steel::TEXT_2, Color32::WHITE, hover));
+    // Close fills with the action color under the pointer, so its cross goes white.
+    let ink = Stroke::new(1.2, steel::lerp(look::text_2(), if which == 2 { Color32::WHITE } else { look::text() }, hover));
     match which {
         0 => {
             p.line_segment([c + vec2(-5.0, 0.5), c + vec2(5.0, 0.5)], ink);

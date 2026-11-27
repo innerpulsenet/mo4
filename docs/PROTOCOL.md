@@ -348,9 +348,10 @@ figures MO4 uses.
   measured below 40 Hz, where a bell near 50 Hz with a Q of 0.5 to 0.6 fits band 0 as
   well as the shelf does. A listening test the same day settled nothing.
 
-MO4 labels the bands with the measured figures only when the model starts with
-`M4AEBT` and the reported frequencies are the five above; otherwise it shows what the
-headphones report.
+MO4 draws its equalizer graph from these figures (the sum of the five fitted filters,
+40 Hz to 18 kHz, without the level change) only when the model starts with `M4AEBT`
+and the reported frequencies are the five above; otherwise it shows evenly spaced
+bands under what the headphones report.
 
 Firmware from 2.12.0 up to 3.18.0 used a different equalizer on the same command
 words (a master gain and four shelves, computed in the app). MO4 does not speak it

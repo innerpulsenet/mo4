@@ -42,6 +42,7 @@ fn main() {
     let mut trace = false;
     let mut shot = None;
     let mut shot_delay = std::time::Duration::ZERO;
+    let mut plate = None;
     let mut rest = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -61,6 +62,10 @@ fn main() {
                 Some(c) => target.channel = Some(c),
                 None => fail("--channel needs a number from 1 to 30"),
             },
+            "--look" => match args.next().as_deref().and_then(ui::look::Ground::parse) {
+                Some(ground) => plate = Some(ground),
+                None => fail("--look needs steel or aluminum"),
+            },
             "--shot" => match args.next() {
                 Some(path) => shot = Some(path),
                 None => fail("--shot needs a file name"),
@@ -73,7 +78,7 @@ fn main() {
         }
     }
     if rest.is_empty() {
-        if let Err(e) = ui::run(target, trace, shot.map(|path| (path, shot_delay))) {
+        if let Err(e) = ui::run(target, trace, shot.map(|path| (path, shot_delay)), plate) {
             fail(&format!("could not open the window: {e}"));
         }
         return;

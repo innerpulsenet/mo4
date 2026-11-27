@@ -25,13 +25,17 @@ pub struct Band {
     /// The center of a bell, or the point where a shelf has done half its work.
     pub hz: f32,
     /// The fitted width, as the Q of a standard second-order filter.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub q: f32,
     /// dB at the band's strongest point for each dB set on it.
     pub reach: f32,
     /// What the headphones report for this band, in Hz.
     pub reported: u16,
 }
+
+/// The range the microphone covered. The graph draws the curve across this and no
+/// further: below 40 Hz the lowest band was not measured.
+pub const LOW_HZ: f32 = 40.0;
+pub const HIGH_HZ: f32 = 18_000.0;
 
 /// The MOMENTUM 4's five bands, lowest first.
 pub const MOMENTUM_4: [Band; 5] = [
@@ -120,8 +124,7 @@ impl Band {
 
     /// This band's change in dB at `hz` when set to `db`: a standard second-order
     /// filter at a 48 kHz sample rate, which is what the fit used.
-    #[cfg(test)]
-    fn db_at(&self, db: f32, hz: f32) -> f32 {
+    pub fn db_at(&self, db: f32, hz: f32) -> f32 {
         use std::f32::consts::PI;
         const RATE: f32 = 48_000.0;
         let a = 10f32.powf(db * self.reach / 40.0);
@@ -151,10 +154,27 @@ impl Band {
     }
 }
 
-/// What a curve does at `hz`, in dB, on the measured bands. `gains` are tenths of a dB.
-#[cfg(test)]
-pub fn response(gains: &[i8], hz: f32) -> f32 {
-    MOMENTUM_4.iter().zip(gains).map(|(band, g)| band.db_at(f32::from(*g) / 10.0, hz)).sum()
+/// What a curve does at `hz`: the bands added up, in dB. `gains` are in dB, one per
+/// band. Recorded curves came out within half a dB of this sum.
+pub fn response(bands: &[Band], gains: &[f32], hz: f32) -> f32 {
+    bands.iter().zip(gains).map(|(band, db)| band.db_at(*db, hz)).sum()
+}
+
+/// The frequency a fraction `t` of the way along the graph, 0 at the left edge.
+pub fn hz_at(t: f32) -> f32 {
+    LOW_HZ * (HIGH_HZ / LOW_HZ).powf(t)
+}
+
+/// Where a frequency sits along the graph, as a fraction: the inverse of `hz_at`.
+pub fn place(hz: f32) -> f32 {
+    (hz / LOW_HZ).ln() / (HIGH_HZ / LOW_HZ).ln()
+}
+
+/// The furthest from zero that any curve can get with every band within `db` of
+/// zero. The bands overlap, so this is more than `db`.
+pub fn reach(bands: &[Band], db: f32) -> f32 {
+    let all = vec![db; bands.len()];
+    (0..=96).map(|i| response(bands, &all, hz_at(i as f32 / 96.0)).abs()).fold(0.0, f32::max)
 }
 
 #[cfg(test)]
@@ -184,10 +204,11 @@ mod tests {
     #[test]
     fn model_matches_what_was_recorded() {
         let one = |band: usize| {
-            let mut g = [0i8; 5];
-            g[band] = 60;
+            let mut g = [0.0; 5];
+            g[band] = 6.0;
             g
         };
+        let response = |gains: &[f32; 5], hz: f32| response(&MOMENTUM_4, gains, hz);
         let near = |got: f32, want: f32| assert!((got - want).abs() < 0.5, "got {got:.2}, recorded {want:.2}");
         near(response(&one(0), 50.0), 5.6);
         near(response(&one(0), 500.0), 0.1);
@@ -199,6 +220,17 @@ mod tests {
         near(response(&one(4), 6000.0), 3.1);
         near(response(&one(4), 12000.0), 5.9);
         near(response(&one(4), 2000.0), 0.0);
+    }
+
+    #[test]
+    fn the_graph_axis_runs_both_ways_and_has_room_for_the_sum() {
+        for hz in [LOW_HZ, 215.0, 4230.0, HIGH_HZ] {
+            assert!((hz_at(place(hz)) - hz).abs() < hz * 0.001);
+        }
+        assert!(place(LOW_HZ).abs() < 1e-6 && (place(HIGH_HZ) - 1.0).abs() < 1e-6);
+        // Every band at +6 adds up to more than 6 where they overlap, and less than 8.
+        let most = reach(&MOMENTUM_4, 6.0);
+        assert!(most > 6.5 && most < 8.0, "{most}");
     }
 
     #[test]

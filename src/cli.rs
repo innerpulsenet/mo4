@@ -53,6 +53,7 @@ Options:
   --sim                      talk to a simulated headset (made-up values)
   --trace                    print every frame sent and received
   --version                  print the version and the commit it was built from
+  --look steel|aluminum      open the window on that plate for this run
 ";
 
 const KEYS: [&str; 16] = [

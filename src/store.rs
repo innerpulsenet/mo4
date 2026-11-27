@@ -145,6 +145,17 @@ pub fn save_presets(presets: &[Preset]) -> Result<(), String> {
     fs::write(dir.join("presets.txt"), format_presets(presets)).map_err(|e| e.to_string())
 }
 
+/// Which plate the window was last given, as its name: kept beside the presets.
+pub fn load_look() -> Option<String> {
+    fs::read_to_string(config_dir()?.join("look.txt")).ok()
+}
+
+pub fn save_look(name: &str) -> Result<(), String> {
+    let dir = config_dir().ok_or("no place to keep it")?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::write(dir.join("look.txt"), format!("{name}\n")).map_err(|e| e.to_string())
+}
+
 pub fn find_preset<'a>(presets: &'a [Preset], name: &str) -> Option<&'a Preset> {
     presets.iter().find(|p| p.name.eq_ignore_ascii_case(name))
 }
@@ -202,7 +213,12 @@ mod tests {
     /// What each curve does on the bands as they were measured, in dB at a frequency.
     fn at(name: &str, hz: f32) -> f32 {
         let all = builtin_presets();
-        crate::bands::response(&find_preset(&all, name).unwrap_or_else(|| panic!("{name}")).gains, hz)
+        heard(&find_preset(&all, name).unwrap_or_else(|| panic!("{name}")).gains, hz)
+    }
+
+    fn heard(gains: &[i8], hz: f32) -> f32 {
+        let db: Vec<f32> = gains.iter().map(|g| f32::from(*g) / 10.0).collect();
+        crate::bands::response(&crate::bands::MOMENTUM_4, &db, hz)
     }
 
     /// No curve stacks its bands into more than the equalizer's own 6 dB anywhere.
@@ -211,7 +227,7 @@ mod tests {
         for p in builtin_presets() {
             for step in 0..=54 {
                 let hz = 30.0 * 2f32.powf(step as f32 / 6.0);
-                let db = crate::bands::response(&p.gains, hz);
+                let db = heard(&p.gains, hz);
                 assert!(db.abs() <= 6.0, "{} is {db:+.1} dB at {hz:.0} Hz", p.name);
             }
         }

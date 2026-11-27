@@ -40,11 +40,15 @@ testing, which the titlebar labels as such.
 
 ### Equalizer
 
-The headphones' own five-band equalizer, edited on a graph.
+The headphones' own five-band equalizer, edited on a graph of what it does to the
+sound.
 
-- The labels under the graph say where each band acts, as measured: `<120` and `>5.9k`
-  are shelves that move everything below or above that point. Point at a label for
-  what the band does and what the headphones call it.
+- The curve is the frequency response from 40 Hz to 18 kHz: what the five bands add
+  up to, worked out from a [measurement](#what-the-curves-rest-on) of each band.
+- Each node stands at its band's frequency, at the gain set on that band. Node and
+  curve part ways where a band gives less than is set or its neighbors add to it.
+- Point at a node to see that band's own share of the curve, what kind of filter it
+  is, and what the headphones call it.
 - Drag a node, scroll over a band, or use the arrow keys. Steps are half a dB, a tenth
   with Shift held. Double-click a node to zero it.
 - A lamp says whether the curve is on the headphones, and what the headphones hold is
@@ -69,11 +73,20 @@ The headphones' own five-band equalizer, edited on a graph.
 - Battery and charging, model, firmware, serial number, the codec in use with its
   sample rate, and whether the headphones are being worn.
 
+### Two plates
+
+![The window on bare aluminum](docs/screenshot-aluminum.png)
+
+The window is one plate of brushed metal with dark screens let into it, and it comes in
+brushed steel or bare aluminum. The key with the two-tone disc in the titlebar changes
+the plate, and MO4 remembers the choice. Screens, lamps and lit keys are the same on
+both: only the metal changes, and what is written on it.
+
 ### Nothing is guessed
 
 Every value on screen is one the headphones reported, with one exception that the
-screen marks: the labels under the equalizer say where each band was
-[measured](#what-the-curves-rest-on) to act. A setting the headphones did not report
+screen marks: the equalizer's curve is worked out from the gains they report and a
+[measurement](#what-the-curves-rest-on) of what each band does. A setting the headphones did not report
 shows as N/A or "not reported". After each change the app reads the value back and says
 whether the headphones confirmed it. The line at the bottom shows what happened last;
 click it for the history.
@@ -144,7 +157,9 @@ What this is worth: one pair of M4AEBT SE on firmware 3.38.3 and one microphone
 position, with nothing measured below 40 Hz, so the lowest band could also be a very
 wide bell near 50 Hz (from 40 Hz up the two are the same). MO4 uses these figures only
 for headphones of that model that report that band layout, and marks the graph "bands
-as measured" when it does. The method and the numbers are in
+as measured" when it does; for anything else the graph is five evenly spaced nodes
+under the frequencies the headphones report. The curve shows the shape of a setting,
+not the drop in overall level that comes with a boost. The method and the numbers are in
 [docs/PROTOCOL.md](docs/PROTOCOL.md#what-the-bands-do).
 
 The game curves share one idea. Rumble masks the quiet sounds that give a position
@@ -211,8 +226,9 @@ mo4 help                    the settings and their values
 
 Options: `--addr AA:BB:CC:DD:EE:FF` to use one device instead of searching,
 `--channel N` to name the RFCOMM channel (Linux), `--trace` to print every frame,
-`--sim` to talk to the built-in simulated headset, and `--version` to print the version
-and the commit it was built from. The window shows the version at the bottom right.
+`--sim` to talk to the built-in simulated headset, `--look steel` or `--look aluminum`
+to open the window on that plate for one run, and `--version` to print the version and
+the commit it was built from. The window shows the version at the bottom right.
 
 ## What it will not do
 
@@ -240,8 +256,8 @@ on Windows: `cargo build --release` gives `target\release\mo4.exe`.
 and against frames captured from real headphones. GitHub builds and packages both
 platforms on every push, and publishes a release when a version tag is pushed.
 
-Your presets are kept as plain text in `presets.txt`: in `~/.config/mo4/` on Linux and
-next to the exe on Windows.
+Your presets are kept as plain text in `presets.txt`, and the choice of plate in
+`look.txt`: in `~/.config/mo4/` on Linux and next to the exe on Windows.
 
 ## Credits
 
